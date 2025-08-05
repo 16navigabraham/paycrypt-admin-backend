@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: paycrypt-admin-backend
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_URL
+        value: https://admin.paycrypt.org
+      - key: RENDER
+        value: true
+      - key: ENABLE_CRON
+        value: true
+      # Add your other environment variables in Render dashboard:
+      # - MONGODB_URI (from your MongoDB Atlas)
+      # - JWT_SECRET (generate a secure random string)
+      # - RPC_URL (Base chain RPC)
+      # - SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (email settings)
+      # - ADMIN_EMAIL, ADMIN_PASSWORD (initial admin credentials)
