@@ -8,14 +8,26 @@ const Admin = require('../models/Admin');
 const { authMiddleware } = require('../middleware/auth');
 const { getSyncStatus, forceSyncAll } = require('../jobs/cronJobs');
 
-// Configure nodemailer
-const transporter = nodemailer.createTransporter({
+// Configure nodemailer (FIXED: createTransport not createTransporter)
+const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: false,
+  port: parseInt(process.env.SMTP_PORT) || 587,
+  secure: false, // true for 465, false for other ports
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
+  },
+  tls: {
+    rejectUnauthorized: false
+  }
+});
+
+// Test email configuration on startup
+transporter.verify((error, success) => {
+  if (error) {
+    console.log('❌ Email configuration error:', error.message);
+  } else {
+    console.log('✅ Email server is ready to send messages');
   }
 });
 
@@ -131,39 +143,57 @@ router.post('/forgot-password', async (req, res) => {
     await admin.save();
     
     // Create reset URL
-    const resetUrl = `${process.env.FRONTEND_URL}/admin/reset-password?token=${resetToken}`;
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
     
     // Send reset email
     const mailOptions = {
-      from: process.env.SMTP_USER,
+      from: `"Paycrypt Admin" <${process.env.SMTP_USER}>`,
       to: admin.email,
       subject: 'Password Reset Request - Paycrypt Admin',
       html: `
         <div style="max-width: 600px; margin: 0 auto; padding: 20px; font-family: Arial, sans-serif;">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #333; margin: 0;">Paycrypt</h1>
+            <p style="color: #666; margin: 5px 0;">Admin Panel</p>
+          </div>
+          
           <h2 style="color: #333;">Password Reset Request</h2>
           <p>You requested a password reset for your Paycrypt admin account.</p>
           <p>Click the button below to reset your password (expires in 1 hour):</p>
+          
           <div style="text-align: center; margin: 30px 0;">
             <a href="${resetUrl}" 
-               style="display: inline-block; padding: 12px 24px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">
+               style="display: inline-block; padding: 15px 30px; background-color: #007bff; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
               Reset Password
             </a>
           </div>
-          <p style="color: #666; font-size: 14px;">
-            If you didn't request this, please ignore this email.<br>
-            For security reasons, this link will expire in 1 hour.
-          </p>
-          <p style="color: #666; font-size: 12px;">
-            If the button doesn't work, copy and paste this link:<br>
-            <a href="${resetUrl}">${resetUrl}</a>
-          </p>
+          
+          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #666; font-size: 14px; margin: 0;">
+              <strong>Security Note:</strong><br>
+              • This link expires in 1 hour<br>
+              • If you didn't request this, please ignore this email<br>
+              • Your password won't change until you click the link above
+            </p>
+          </div>
+          
+          <div style="border-top: 1px solid #eee; padding-top: 20px; margin-top: 30px;">
+            <p style="color: #666; font-size: 12px;">
+              If the button doesn't work, copy and paste this link into your browser:<br>
+              <a href="${resetUrl}" style="color: #007bff; word-break: break-all;">${resetUrl}</a>
+            </p>
+          </div>
         </div>
       `
     };
     
-    await transporter.sendMail(mailOptions);
-    
-    console.log(`📧 Password reset email sent to: ${admin.email}`);
+    try {
+      await transporter.sendMail(mailOptions);
+      console.log(`📧 Password reset email sent to: ${admin.email}`);
+    } catch (emailError) {
+      console.error('❌ Email sending failed:', emailError);
+      // Don't reveal email sending failure to user for security
+    }
     
     res.json({ 
       message: 'If the email exists, a reset link has been sent' 
@@ -300,10 +330,21 @@ router.get('/system/status', authMiddleware, async (req, res) => {
         uptime: process.uptime(),
         memory: process.memoryUsage(),
         nodeVersion: process.version,
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || 'development',
+        timestamp: new Date()
       },
       database: {
-        connected: true // If we reach here, DB is connected
+        connected: true, // If we reach here, DB is connected
+        url: process.env.MONGODB_URI ? 'Connected' : 'Not configured'
+      },
+      blockchain: {
+        network: 'Base Mainnet',
+        contract: '0x0574A0941Ca659D01CF7370E37492bd2DF43128d',
+        rpcUrl: process.env.RPC_URL ? 'Configured' : 'Not configured'
+      },
+      email: {
+        configured: !!(process.env.SMTP_USER && process.env.SMTP_PASS),
+        host: process.env.SMTP_HOST || 'Not configured'
       },
       sync: syncStatus,
       timestamp: new Date()
@@ -330,12 +371,49 @@ router.post('/system/sync', authMiddleware, async (req, res) => {
     
     res.json({ 
       message: 'Sync initiated successfully',
-      timestamp: new Date()
+      timestamp: new Date(),
+      initiatedBy: req.admin.email
     });
   } catch (error) {
     console.error('❌ Force sync error:', error);
     res.status(500).json({ 
       error: 'Failed to initiate sync' 
+    });
+  }
+});
+
+// Test email configuration (protected)
+router.post('/system/test-email', authMiddleware, async (req, res) => {
+  try {
+    const testMailOptions = {
+      from: `"Paycrypt Admin" <${process.env.SMTP_USER}>`,
+      to: req.admin.email,
+      subject: 'Test Email - Paycrypt Backend',
+      html: `
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px; font-family: Arial, sans-serif;">
+          <h2 style="color: #333;">Email Configuration Test</h2>
+          <p>This is a test email to verify your email configuration is working properly.</p>
+          <p><strong>Sent at:</strong> ${new Date().toISOString()}</p>
+          <p><strong>From:</strong> Paycrypt Backend</p>
+          <p style="color: #28a745;"><strong>✅ Email system is working correctly!</strong></p>
+        </div>
+      `
+    };
+    
+    await transporter.sendMail(testMailOptions);
+    
+    console.log(`📧 Test email sent to: ${req.admin.email}`);
+    
+    res.json({ 
+      message: 'Test email sent successfully',
+      sentTo: req.admin.email,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    console.error('❌ Test email error:', error);
+    res.status(500).json({ 
+      error: 'Failed to send test email',
+      details: error.message
     });
   }
 });
