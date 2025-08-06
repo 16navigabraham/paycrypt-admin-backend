@@ -35,152 +35,82 @@ app.use(helmet({
   },
 }));
 
-// CORS configuration for production
+// CORS configuration for production (FIXED)
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+    console.log('🌐 CORS Request from origin:', origin);
+    
+    // Allow requests with no origin (like mobile apps, curl, or Postman)
+    if (!origin) {
+      console.log('✅ Allowing request with no origin');
+      return callback(null, true);
+    }
     
     const allowedOrigins = [
       'https://admin.paycrypt.org',
       'https://paycrypt.org',
       'http://localhost:3000',
-      'http://localhost:3001'
+      'http://localhost:3001',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001'
     ];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
+      console.log('✅ CORS allowed for origin:', origin);
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      console.log('❌ CORS blocked for origin:', origin);
+      callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin'
+  ],
+  exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 
 app.use(cors(corsOptions));
 
+// Additional CORS headers middleware (backup)
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://admin.paycrypt.org',
+    'https://paycrypt.org',
+    'http://localhost:3000',
+    'http://localhost:3001'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    console.log('✅ Handling preflight request for:', req.path);
+    return res.status(204).end();
+  }
+  
+  next();
+});
+
 // Rate limiting - more restrictive for production
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 200 : 100, // Higher limit for production
-  message: { error: 'Too many requests, please try again later.' },
-  standardHeaders: true,
-  legacyHeaders: false,
+  max: process.env.NODE_ENV === 'production' ? 200 : 100,
 });
+
 app.use(limiter);
-
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-// Health check endpoint (before other routes)
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    chain: 'Base',
-    contract: '0x0574A0941Ca659D01CF7370E37492bd2DF43128d'
-  });
-});
-
-// Connect to MongoDB
-console.log('🔗 Connecting to MongoDB...');
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-  .then(() => {
-    console.log('✅ MongoDB connected successfully');
-    // Initialize contract service after DB connection
-    contractService.initialize();
-  })
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err);
-    process.exit(1);
-  });
-
-// Routes
-app.use('/api/stats', statsRoutes);
-app.use('/api/orders', ordersRoutes);
-app.use('/api/admin', adminRoutes);
-
-// Root endpoint
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Paycrypt Admin Backend API - Base Chain',
-    version: '1.0.0',
-    chain: 'Base Mainnet',
-    contract: '0x0574A0941Ca659D01CF7370E37492bd2DF43128d',
-    endpoints: ['/api/stats', '/api/orders', '/api/admin', '/health']
-  });
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('❌ Error:', err.stack);
-  
-  // CORS error
-  if (err.message === 'Not allowed by CORS') {
-    return res.status(403).json({ 
-      error: 'CORS policy violation',
-      message: 'Origin not allowed'
-    });
-  }
-  
-  res.status(500).json({ 
-    error: 'Something went wrong!',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
-  });
-});
-
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({ error: 'Route not found' });
-});
-
-// Start cron jobs only in production or when explicitly enabled
-if (process.env.NODE_ENV === 'production' || process.env.ENABLE_CRON === 'true') {
-  console.log('🕐 Setting up cron jobs...');
-
-  // Every hour: sync contract metrics
-  cron.schedule('0 * * * *', () => {
-    console.log('⏰ Running hourly metrics sync...');
-    syncContractMetrics().catch(error => {
-      console.error('❌ Cron metrics sync error:', error);
-    });
-  });
-
-  // Every 12 hours: sync order history
-  cron.schedule('0 */12 * * *', () => {
-    console.log('⏰ Running 12-hour order history sync...');
-    syncOrderHistory().catch(error => {
-      console.error('❌ Cron order sync error:', error);
-    });
-  });
-
-  // Run initial sync after 30 seconds (only in production)
-  if (process.env.NODE_ENV === 'production') {
-    setTimeout(() => {
-      console.log('🚀 Running initial sync...');
-      syncContractMetrics().catch(console.error);
-      setTimeout(() => {
-        syncOrderHistory().catch(console.error);
-      }, 5000); // Stagger the syncs
-    }, 30000);
-  }
-} else {
-  console.log('⚠️  Cron jobs disabled (development mode)');
-}
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`⛓️  Chain: Base Mainnet`);
-  console.log(`📋 Contract: 0x0574A0941Ca659D01CF7370E37492bd2DF43128d`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`🌐 Frontend: ${process.env.FRONTEND_URL}`);
-});
