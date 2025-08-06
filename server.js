@@ -13,7 +13,7 @@ const adminRoutes = require('./routes/admin');
 
 // Import services
 const contractService = require('./services/contractService');
-const { syncContractMetrics, syncOrderHistory, initializeDefaultAdmin } = require('./jobs/cronJobs');
+const { syncContractMetrics, syncOrderHistory } = require('./jobs/cronJobs');
 
 const app = express();
 
@@ -35,92 +35,39 @@ app.use(helmet({
   },
 }));
 
-// CORS configuration - FIXED for admin.paycrypt.org
+// CORS configuration for production
 const corsOptions = {
   origin: function (origin, callback) {
-    console.log('🌐 CORS Request from origin:', origin);
-    
-    // Allow requests with no origin (mobile apps, curl, Postman)
-    if (!origin) {
-      console.log('✅ Allowing request with no origin');
-      return callback(null, true);
-    }
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
     
     const allowedOrigins = [
       'https://admin.paycrypt.org',
       'https://paycrypt.org',
       'http://localhost:3000',
-      'http://localhost:3001',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:3001'
+      'http://localhost:3001'
     ];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
-      console.log('✅ CORS allowed for origin:', origin);
       callback(null, true);
     } else {
-      console.log('❌ CORS blocked for origin:', origin);
-      console.log('❌ Allowed origins:', allowedOrigins);
-      callback(new Error(`CORS: Origin ${origin} not allowed`));
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
-    'X-Requested-With',
-    'Accept',
-    'Origin',
-    'Access-Control-Request-Method',
-    'Access-Control-Request-Headers'
-  ],
-  exposedHeaders: ['Content-Length'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 };
 
 app.use(cors(corsOptions));
 
-// Additional CORS headers (backup layer)
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://admin.paycrypt.org',
-    'https://paycrypt.org',
-    'http://localhost:3000',
-    'http://localhost:3001'
-  ];
-  
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    console.log('✅ Handling OPTIONS preflight for:', req.path, 'from:', origin);
-    return res.status(204).end();
-  }
-  
-  next();
-});
-
-// Rate limiting
+// Rate limiting - more restrictive for production
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 300 : 100, // Increased for production
+  max: process.env.NODE_ENV === 'production' ? 200 : 100, // Higher limit for production
   message: { error: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => {
-    // Skip rate limiting for health checks
-    return req.path === '/health' || req.path === '/';
-  }
 });
 app.use(limiter);
 
@@ -135,10 +82,30 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     chain: 'Base',
-    contract: '0x0574A0941Ca659D01CF7370E37492bd2DF43128d',
-    environment: process.env.NODE_ENV || 'development'
+    contract: '0x0574A0941Ca659D01CF7370E37492bd2DF43128d'
   });
 });
+
+// Connect to MongoDB
+console.log('🔗 Connecting to MongoDB...');
+mongoose.connect(process.env.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+  .then(() => {
+    console.log('✅ MongoDB connected successfully');
+    // Initialize contract service after DB connection
+    contractService.initialize();
+  })
+  .catch(err => {
+    console.error('❌ MongoDB connection error:', err);
+    process.exit(1);
+  });
+
+// Routes
+app.use('/api/stats', statsRoutes);
+app.use('/api/orders', ordersRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -147,126 +114,31 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     chain: 'Base Mainnet',
     contract: '0x0574A0941Ca659D01CF7370E37492bd2DF43128d',
-    endpoints: ['/api/stats', '/api/orders', '/api/admin', '/health'],
-    cors: {
-      allowedOrigins: [
-        'https://admin.paycrypt.org',
-        'https://paycrypt.org'
-      ]
-    }
+    endpoints: ['/api/stats', '/api/orders', '/api/admin', '/health']
   });
 });
-
-// Connect to MongoDB with better error handling
-console.log('🔗 Connecting to MongoDB...');
-console.log('🔗 MongoDB URI configured:', !!process.env.MONGODB_URI);
-
-if (!process.env.MONGODB_URI) {
-  console.error('❌ MONGODB_URI environment variable is not set!');
-  process.exit(1);
-}
-
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => {
-    console.log('✅ MongoDB connected successfully');
-    
-    // Initialize default admin
-    initializeDefaultAdmin().catch(console.error);
-    
-    // Initialize contract service after DB connection
-    try {
-      contractService.initialize();
-      console.log('✅ Contract service initialized');
-    } catch (error) {
-      console.error('❌ Contract service initialization failed:', error.message);
-      // Don't exit - service can still work without contract initially
-    }
-  })
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err.message);
-    console.error('❌ Make sure MONGODB_URI is set correctly');
-    process.exit(1);
-  });
-
-// MongoDB connection event handlers
-mongoose.connection.on('disconnected', () => {
-  console.log('⚠️  MongoDB disconnected');
-});
-
-mongoose.connection.on('reconnected', () => {
-  console.log('✅ MongoDB reconnected');
-});
-
-// Routes
-app.use('/api/stats', statsRoutes);
-app.use('/api/orders', ordersRoutes);
-app.use('/api/admin', adminRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('❌ Error:', err.stack);
   
   // CORS error
-  if (err.message.includes('CORS') || err.message.includes('Origin')) {
+  if (err.message === 'Not allowed by CORS') {
     return res.status(403).json({ 
       error: 'CORS policy violation',
-      message: `Origin not allowed: ${req.headers.origin}`,
-      allowedOrigins: [
-        'https://admin.paycrypt.org',
-        'https://paycrypt.org'
-      ]
-    });
-  }
-  
-  // Rate limit error
-  if (err.status === 429) {
-    return res.status(429).json({
-      error: 'Too many requests',
-      message: 'Please try again later'
+      message: 'Origin not allowed'
     });
   }
   
   res.status(500).json({ 
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+    error: 'Something went wrong!',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
   });
 });
 
 // 404 handler
 app.use('*', (req, res) => {
-  console.log('❌ 404 - Route not found:', req.method, req.originalUrl);
-  res.status(404).json({ 
-    error: 'Route not found',
-    path: req.originalUrl,
-    method: req.method
-  });
-});
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('🛑 Received SIGINT, shutting down gracefully...');
-  
-  try {
-    await mongoose.connection.close();
-    console.log('✅ MongoDB connection closed');
-  } catch (error) {
-    console.error('❌ Error closing MongoDB:', error);
-  }
-  
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  console.log('🛑 Received SIGTERM, shutting down gracefully...');
-  
-  try {
-    await mongoose.connection.close();
-    console.log('✅ MongoDB connection closed');
-  } catch (error) {
-    console.error('❌ Error closing MongoDB:', error);
-  }
-  
-  process.exit(0);
+  res.status(404).json({ error: 'Route not found' });
 });
 
 // Start cron jobs only in production or when explicitly enabled
@@ -289,46 +161,26 @@ if (process.env.NODE_ENV === 'production' || process.env.ENABLE_CRON === 'true')
     });
   });
 
-  // Run initial sync after 1 minute (only in production)
+  // Run initial sync after 30 seconds (only in production)
   if (process.env.NODE_ENV === 'production') {
     setTimeout(() => {
       console.log('🚀 Running initial sync...');
-      syncContractMetrics()
-        .then(() => {
-          console.log('✅ Initial metrics sync completed');
-          // Stagger order sync
-          setTimeout(() => {
-            syncOrderHistory()
-              .then(() => console.log('✅ Initial order sync completed'))
-              .catch(error => console.error('❌ Initial order sync failed:', error));
-          }, 10000);
-        })
-        .catch(error => console.error('❌ Initial metrics sync failed:', error));
-    }, 60000); // 1 minute delay
+      syncContractMetrics().catch(console.error);
+      setTimeout(() => {
+        syncOrderHistory().catch(console.error);
+      }, 5000); // Stagger the syncs
+    }, 30000);
   }
 } else {
   console.log('⚠️  Cron jobs disabled (development mode)');
 }
 
-// Start server
 const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`⛓️  Chain: Base Mainnet`);
   console.log(`📋 Contract: 0x0574A0941Ca659D01CF7370E37492bd2DF43128d`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`🌐 CORS allowed for: https://admin.paycrypt.org`);
-  console.log(`🔗 MongoDB: ${process.env.MONGODB_URI ? 'Configured' : 'NOT CONFIGURED'}`);
-  console.log(`📧 Email: ${process.env.SMTP_USER ? 'Configured' : 'NOT CONFIGURED'}`);
+  console.log(`🌐 Frontend: ${process.env.FRONTEND_URL}`);
 });
-
-// Handle server errors
-server.on('error', (error) => {
-  console.error('❌ Server error:', error);
-  process.exit(1);
-});
-
-// Keep server alive
-server.keepAliveTimeout = 120000; // 2 minutes
-server.headersTimeout = 120000; // 2 minutes
