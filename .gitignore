@@ -2,3 +2,8 @@
 .env.local
 .env.development.local
 .env.example
+
+RENDER_MIGRATION_GUIDE.md
+node_modules
+
+DEPLOY_TO_RENDER.md

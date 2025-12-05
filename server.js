@@ -16,6 +16,7 @@ const orderAnalyticsRoutes = require('./routes/orderAnalytics');
 // Import services
 const contractService = require('./services/contractService');
 const { syncContractMetrics, syncOrderHistory, syncTotalVolume } = require('./jobs/cronJobs');
+const runMigration = require('./migrations/fix-syncstatus-index');
 
 const app = express();
 
@@ -94,9 +95,20 @@ mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-  .then(() => {
+  .then(async () => {
     console.log('✅ MongoDB connected successfully');
-    // Initialize contract service after DB connection
+    
+    // Run database migration on startup (safe to run multiple times)
+    console.log('🔧 Running database migrations...');
+    try {
+      await runMigration();
+      console.log('✅ Database migrations completed');
+    } catch (error) {
+      console.warn('⚠️  Migration warning:', error.message);
+      console.log('📝 Continuing with startup - migration will retry on next restart');
+    }
+    
+    // Initialize contract service after DB connection and migration
     contractService.initialize();
   })
   .catch(err => {

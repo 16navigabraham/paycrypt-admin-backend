@@ -23,7 +23,9 @@ const TOKEN_ID_MAP = {
 class PriceService {
   constructor() {
     this.priceCache = new Map();
-    this.cacheExpiry = 60000; // 1 minute cache
+    this.cacheExpiry = 300000; // 5 minute cache to avoid rate limiting
+    this.lastApiCall = 0;
+    this.minTimeBetweenCalls = 10000; // Minimum 10 seconds between API calls
   }
 
   /**
@@ -60,9 +62,38 @@ class PriceService {
     }
 
     const uniqueIds = [...new Set(coinGeckoIds)];
+    
+    // Check cache first for all IDs
+    const now = Date.now();
+    const allCached = uniqueIds.every(id => {
+      const cached = this.priceCache.get(id);
+      return cached && (now - cached.timestamp) < this.cacheExpiry;
+    });
+    
+    if (allCached) {
+      console.log('💰 Using cached prices (cache valid)');
+      const cachedPrices = {};
+      for (const id of uniqueIds) {
+        const cached = this.priceCache.get(id);
+        if (cached) {
+          cachedPrices[id] = cached.prices;
+        }
+      }
+      return cachedPrices;
+    }
+    
+    // Rate limiting - wait if needed
+    const timeSinceLastCall = now - this.lastApiCall;
+    if (timeSinceLastCall < this.minTimeBetweenCalls) {
+      const waitTime = this.minTimeBetweenCalls - timeSinceLastCall;
+      console.log(`⏳ Rate limiting: waiting ${waitTime}ms before API call`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+    
     const ids = uniqueIds.join(',');
     
     try {
+      this.lastApiCall = Date.now();
       const response = await axios.get(`${PRICE_API_URL}/api/v3/simple/price`, {
         params: {
           ids,
