@@ -160,25 +160,25 @@ app.use('*', (req, res) => {
 if (process.env.NODE_ENV === 'production' || process.env.ENABLE_CRON === 'true') {
   console.log('🕐 Setting up cron jobs...');
 
-  // Every hour: sync contract metrics
-  cron.schedule('0 * * * *', () => {
-    console.log('⏰ Running hourly metrics sync...');
+  // Every 30 minutes: sync contract metrics
+  cron.schedule('*/30 * * * *', () => {
+    console.log('⏰ Running 30-minute metrics sync...');
     syncContractMetrics().catch(error => {
       console.error('❌ Cron metrics sync error:', error);
     });
   });
 
-  // Every 12 hours: sync order history
-  cron.schedule('0 */12 * * *', () => {
-    console.log('⏰ Running 12-hour order history sync...');
+  // Every 30 minutes: sync order history
+  cron.schedule('*/30 * * * *', () => {
+    console.log('⏰ Running 30-minute order history sync...');
     syncOrderHistory().catch(error => {
       console.error('❌ Cron order sync error:', error);
     });
   });
 
-  // Every 15 minutes: sync total volume
-  cron.schedule('*/15 * * * *', () => {
-    console.log('⏰ Running 15-minute total volume sync...');
+  // Every 3 hours: sync total volume
+  cron.schedule('0 */3 * * *', () => {
+    console.log('⏰ Running 3-hour total volume sync...');
     syncTotalVolume().catch(error => {
       console.error('❌ Cron volume sync error:', error);
     });
