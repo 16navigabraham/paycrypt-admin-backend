@@ -72,15 +72,6 @@ router.get('/', async (req, res) => {
       Order.countDocuments(query)
     ]);
     
-    // Debug: Log first order to verify chainId is present
-    if (orders.length > 0) {
-      console.log('📦 Sample order from DB:', {
-        orderId: orders[0].orderId,
-        chainId: orders[0].chainId,
-        hasChainId: 'chainId' in orders[0]
-      });
-    }
-    
     res.json({
       orders,
       pagination: {

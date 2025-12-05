@@ -5,7 +5,7 @@ const CONTRACTS = {
     name: 'Base',
     address: '0x0574A0941Ca659D01CF7370E37492bd2DF43128d',
     explorer: 'https://basescan.org',
-    rpcUrl: process.env.BASE_RPC_URL || process.env.RPC_URL
+    rpcUrl: process.env.BASE_RPC_URL || `https://base-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
   },
   lisk: {
     chainId: 1135,
@@ -19,7 +19,7 @@ const CONTRACTS = {
     name: 'Celo',
     address: '0xBC955DC38a13c2Cd8736DA1bC791514504202F9D',
     explorer: 'https://celoscan.io',
-    rpcUrl: process.env.CELO_RPC_URL
+    rpcUrl: process.env.CELO_RPC_URL || `https://celo-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
   }
 };
 
