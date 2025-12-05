@@ -3,6 +3,9 @@ const router = express.Router();
 const Order = require('../models/Order');
 const { getStartTime, isValidTimeRange } = require('../utils/timeUtils');
 
+// IMPORTANT: Specific routes MUST come before parameterized routes like /:orderId
+// Otherwise Express will match /:orderId first and treat 'user', 'token', 'analytics', 'recent' as order IDs
+
 // Get orders with optional filtering
 router.get('/', async (req, res) => {
   try {
@@ -99,30 +102,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get order by ID
-router.get('/:orderId', async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    
-    const order = await Order.findOne({ orderId });
-    
-    if (!order) {
-      return res.status(404).json({ 
-        error: 'Order not found',
-        orderId
-      });
-    }
-    
-    res.json(order);
-  } catch (error) {
-    console.error('❌ Error fetching order:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch order' 
-    });
-  }
-});
-
-// Get orders by user wallet
+// Get orders by user wallet (MUST be before /:orderId)
 router.get('/user/:userWallet', async (req, res) => {
   try {
     const { userWallet } = req.params;
@@ -177,11 +157,11 @@ router.get('/token/:tokenAddress', async (req, res) => {
     res.json({
       tokenAddress: tokenAddress.toLowerCase(),
       orders,
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total,
-        pages: Math.ceil(total / limitNum)
+  }
+});
+
+// Get orders by token (MUST be before /:orderId)
+router.get('/token/:tokenAddress', async (req, res) => {
       }
     });
   } catch (error) {
@@ -212,11 +192,11 @@ router.get('/analytics/summary', async (req, res) => {
         {
           $group: {
             _id: null,
-            totalOrders: { $sum: 1 },
-            totalVolume: { 
-              $sum: { 
-                $toDouble: { 
-                  $divide: [{ $toLong: "$amount" }, 1000000000000000000] 
+  }
+});
+
+// Get orders analytics (MUST be before /:orderId)
+router.get('/analytics/summary', async (req, res) => {00000000000000000] 
                 } 
               } 
             },
@@ -339,7 +319,7 @@ router.get('/analytics/summary', async (req, res) => {
   }
 });
 
-// Get recent orders
+// Get recent orders (MUST be before /:orderId)
 router.get('/recent/:count?', async (req, res) => {
   try {
     const count = Math.min(100, Math.max(1, parseInt(req.params.count) || 10));
@@ -355,6 +335,29 @@ router.get('/recent/:count?', async (req, res) => {
     console.error('❌ Error fetching recent orders:', error);
     res.status(500).json({ 
       error: 'Failed to fetch recent orders' 
+    });
+  }
+});
+
+// Get order by ID (MUST be LAST - catches any remaining paths)
+router.get('/:orderId', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    const order = await Order.findOne({ orderId });
+    
+    if (!order) {
+      return res.status(404).json({ 
+        error: 'Order not found',
+        orderId
+      });
+    }
+    
+    res.json(order);
+  } catch (error) {
+    console.error('❌ Error fetching order:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch order' 
     });
   }
 });
