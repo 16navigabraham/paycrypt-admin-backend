@@ -99,6 +99,26 @@ const CONTRACT_ABI = [
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "TokenAlreadySupported",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "UnsupportedToken",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroAddress",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroAmount",
+    "type": "error"
+  },
+  {
     "anonymous": false,
     "inputs": [
       {"indexed": true, "internalType": "uint256", "name": "orderId", "type": "uint256"},
@@ -133,6 +153,25 @@ const CONTRACT_ABI = [
     "type": "event"
   },
   {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "internalType": "address", "name": "tokenAddress", "type": "address"},
+      {"indexed": false, "internalType": "string", "name": "name", "type": "string"},
+      {"indexed": false, "internalType": "uint8", "name": "decimals", "type": "uint8"}
+    ],
+    "name": "TokenAdded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "internalType": "address", "name": "tokenAddress", "type": "address"},
+      {"indexed": false, "internalType": "bool", "name": "status", "type": "bool"}
+    ],
+    "name": "TokenStatusUpdated",
+    "type": "event"
+  },
+  {
     "inputs": [],
     "name": "getOrderCounter",
     "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
@@ -161,7 +200,11 @@ const CONTRACT_ABI = [
     "type": "function"
   },
   {
-    "inputs": [{"internalType": "bytes32", "name": "requestId", "type": "bytes32"}, {"internalType": "address", "name": "tokenAddress", "type": "address"}, {"internalType": "uint256", "name": "amount", "type": "uint256"}],
+    "inputs": [
+      {"internalType": "bytes32", "name": "requestId", "type": "bytes32"},
+      {"internalType": "address", "name": "tokenAddress", "type": "address"},
+      {"internalType": "uint256", "name": "amount", "type": "uint256"}
+    ],
     "name": "createOrder",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -188,6 +231,77 @@ const CONTRACT_ABI = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getSupportedTokens",
+    "outputs": [{"internalType": "address[]", "name": "", "type": "address[]"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "address", "name": "tokenAddress", "type": "address"}],
+    "name": "getTokenDetails",
+    "outputs": [
+      {
+        "components": [
+          {"internalType": "address", "name": "tokenAddress", "type": "address"},
+          {"internalType": "uint256", "name": "orderLimit", "type": "uint256"},
+          {"internalType": "uint256", "name": "totalVolume", "type": "uint256"},
+          {"internalType": "uint256", "name": "successfulOrders", "type": "uint256"},
+          {"internalType": "uint256", "name": "failedOrders", "type": "uint256"},
+          {"internalType": "string", "name": "name", "type": "string"},
+          {"internalType": "uint8", "name": "decimals", "type": "uint8"},
+          {"internalType": "bool", "name": "isActive", "type": "bool"}
+        ],
+        "internalType": "struct Paycrypt.SupportedToken",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "address", "name": "tokenAddress", "type": "address"}],
+    "name": "isTokenSupported",
+    "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "address", "name": "user", "type": "address"}],
+    "name": "getUserOrders",
+    "outputs": [{"internalType": "uint256[]", "name": "", "type": "uint256[]"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "address", "name": "user", "type": "address"},
+      {"internalType": "address", "name": "tokenAddress", "type": "address"}
+    ],
+    "name": "checkBalance",
+    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "address", "name": "user", "type": "address"},
+      {"internalType": "address", "name": "tokenAddress", "type": "address"}
+    ],
+    "name": "checkAllowance",
+    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "version",
+    "outputs": [{"internalType": "string", "name": "", "type": "string"}],
+    "stateMutability": "pure",
     "type": "function"
   }
 ];
