@@ -25,9 +25,11 @@ const TOKEN_ID_MAP = {
 class PriceService {
   constructor() {
     this.priceCache = new Map();
-    this.cacheExpiry = 300000; // 5 minute cache to avoid rate limiting
+    this.cacheExpiry = 600000; // 10 minute cache to avoid rate limiting
     this.lastApiCall = 0;
-    this.minTimeBetweenCalls = 10000; // Minimum 10 seconds between API calls
+    this.minTimeBetweenCalls = 60000; // Minimum 60 seconds between API calls (more aggressive rate limiting)
+    this.lastCoinGeckoCall = 0;
+    this.coinGeckoMinDelay = 120000; // 2 minutes between CoinGecko calls
   }
 
   /**
@@ -159,9 +161,18 @@ class PriceService {
    * Fetch prices from CoinGecko directly (fallback)
    */
   async fetchFromCoinGecko(coinGeckoIds) {
+    // Check rate limiting for CoinGecko
+    const now = Date.now();
+    const timeSinceLastCoinGeckoCall = now - this.lastCoinGeckoCall;
+    if (timeSinceLastCoinGeckoCall < this.coinGeckoMinDelay) {
+      const waitTime = this.coinGeckoMinDelay - timeSinceLastCoinGeckoCall;
+      console.log(`⏳ CoinGecko rate limit: waiting ${Math.round(waitTime / 1000)}s`);      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+    
     const ids = coinGeckoIds.join(',');
     
     try {
+      this.lastCoinGeckoCall = Date.now();
       const response = await axios.get(`${COINGECKO_API_URL}/simple/price`, {
         params: {
           ids,
