@@ -105,7 +105,7 @@ mongoose.connect(process.env.MONGODB_URI, {
     // Run database migration on startup (safe to run multiple times)
     console.log('🔧 Running database migrations...');
     try {
-      await runMigration();
+      await runMigration(mongoose.connection); // Pass existing connection
       console.log('✅ Database migrations completed');
     } catch (error) {
       console.warn('⚠️  Migration warning:', error.message);

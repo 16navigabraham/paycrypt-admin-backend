@@ -10,15 +10,21 @@ require('dotenv').config();
  * Run this script once with: node migrations/fix-syncstatus-index.js
  */
 
-async function fixSyncStatusIndex() {
-  let connection = null;
+async function fixSyncStatusIndex(existingConnection = null) {
+  let shouldCloseConnection = false;
   try {
-    console.log('🔗 Connecting to MongoDB for migration...');
-    connection = await mongoose.connect(process.env.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    console.log('✅ Connected to MongoDB for migration');
+    // Use existing connection if provided, otherwise create new one
+    if (!existingConnection || mongoose.connection.readyState !== 1) {
+      console.log('🔗 Connecting to MongoDB for migration...');
+      await mongoose.connect(process.env.MONGODB_URI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+      });
+      shouldCloseConnection = true;
+      console.log('✅ Connected to MongoDB for migration');
+    } else {
+      console.log('✅ Using existing MongoDB connection for migration');
+    }
 
     const db = mongoose.connection.db;
     const collection = db.collection('syncstatuses');
@@ -112,13 +118,16 @@ async function fixSyncStatusIndex() {
     console.log('  - Old index removed (if existed)');
     console.log('  - Compound index (syncType + chainId) ensured');
     console.log('  - Duplicate documents cleaned up');
-    console.log('\n✅ You can now restart your application');
+    if (shouldCloseConnection) {
+      console.log('\n✅ You can now restart your application');
+    }
 
   } catch (error) {
     console.error('\n❌ Migration failed:', error.message);
     return false;
   } finally {
-    if (connection) {
+    // Only close connection if we created it
+    if (shouldCloseConnection && mongoose.connection.readyState === 1) {
       await mongoose.connection.close();
       console.log('\n👋 Database connection closed');
     }
