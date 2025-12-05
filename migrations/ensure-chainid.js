@@ -8,14 +8,21 @@ require('dotenv').config();
  * Run with: node migrations/ensure-chainid.js
  */
 
-async function ensureChainId() {
+async function ensureChainId(existingConnection = null) {
+  let shouldCloseConnection = false;
   try {
-    console.log('🔗 Connecting to MongoDB...');
-    await mongoose.connect(process.env.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    console.log('✅ Connected to MongoDB');
+    // Use existing connection if provided, otherwise create new one
+    if (!existingConnection || mongoose.connection.readyState !== 1) {
+      console.log('🔗 Connecting to MongoDB...');
+      await mongoose.connect(process.env.MONGODB_URI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+      });
+      shouldCloseConnection = true;
+      console.log('✅ Connected to MongoDB');
+    } else {
+      console.log('✅ Using existing MongoDB connection');
+    }
 
     const db = mongoose.connection.db;
     const ordersCollection = db.collection('orders');
@@ -72,6 +79,9 @@ async function ensureChainId() {
     console.log('\n📝 Summary:');
     console.log(`  - Orders updated: ${result.modifiedCount}`);
     console.log(`  - Default chainId: 8453 (Base)`);
+    if (shouldCloseConnection) {
+      console.log('\n✅ You can now restart your application');
+    }
 
     return true;
 
@@ -79,8 +89,11 @@ async function ensureChainId() {
     console.error('\n❌ Migration failed:', error.message);
     return false;
   } finally {
-    await mongoose.connection.close();
-    console.log('\n👋 Database connection closed');
+    // Only close connection if we created it
+    if (shouldCloseConnection && mongoose.connection.readyState === 1) {
+      await mongoose.connection.close();
+      console.log('\n👋 Database connection closed');
+    }
   }
 }
 

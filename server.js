@@ -109,8 +109,8 @@ mongoose.connect(process.env.MONGODB_URI, {
       await runMigration(mongoose.connection); // Pass existing connection
       console.log('✅ SyncStatus index migration completed');
       
-      // Ensure all orders have chainId
-      await ensureChainId();
+      // Ensure all orders have chainId (pass existing connection)
+      await ensureChainId(mongoose.connection);
       console.log('✅ ChainId migration completed');
     } catch (error) {
       console.warn('⚠️  Migration warning:', error.message);
