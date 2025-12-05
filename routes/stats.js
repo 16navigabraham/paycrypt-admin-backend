@@ -62,9 +62,26 @@ router.get('/', async (req, res) => {
         const currentStats = await contractService.getContractMetrics(parseInt(chainId));
         res.json(currentStats);
       } else {
-        // Get stats for all chains
+        // Get stats for all chains and aggregate
         const allStats = await contractService.getAllContractMetrics();
-        res.json(allStats);
+        
+        // Aggregate stats across all chains
+        const aggregated = {
+          orderCount: '0',
+          totalVolume: '0',
+          successfulOrders: '0',
+          failedOrders: '0',
+          chainStats: allStats
+        };
+        
+        for (const stat of allStats) {
+          aggregated.orderCount = (BigInt(aggregated.orderCount) + BigInt(stat.orderCount)).toString();
+          aggregated.totalVolume = (BigInt(aggregated.totalVolume) + BigInt(stat.totalVolume)).toString();
+          aggregated.successfulOrders = (BigInt(aggregated.successfulOrders) + BigInt(stat.successfulOrders)).toString();
+          aggregated.failedOrders = (BigInt(aggregated.failedOrders) + BigInt(stat.failedOrders)).toString();
+        }
+        
+        res.json(aggregated);
       }
     }
   } catch (error) {
@@ -72,6 +89,30 @@ router.get('/', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to fetch contract stats',
       message: error.message
+    });
+  }
+});
+
+// Get stats for a specific chain by chainId
+router.get('/:chainId', async (req, res) => {
+  try {
+    const chainId = parseInt(req.params.chainId);
+    
+    if (!contractService.isInitialized()) {
+      return res.status(503).json({ 
+        error: 'Contract service not initialized' 
+      });
+    }
+    
+    // Get stats for specific chain
+    const stats = await contractService.getContractMetrics(chainId);
+    res.json(stats);
+  } catch (error) {
+    console.error(`❌ Error fetching stats for chain ${req.params.chainId}:`, error);
+    res.status(500).json({ 
+      error: 'Failed to fetch contract stats for chain',
+      message: error.message,
+      chainId: req.params.chainId
     });
   }
 });
