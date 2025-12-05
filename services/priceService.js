@@ -233,9 +233,10 @@ class PriceService {
     }
 
     try {
-      // Convert BigInt to Number safely, then convert from wei to token amount
+      // Convert BigInt to Number safely for both amount and decimals
       const amountNum = typeof amount === 'bigint' ? Number(amount) : Number(amount);
-      const divisor = Math.pow(10, decimals);
+      const decimalsNum = typeof decimals === 'bigint' ? Number(decimals) : Number(decimals);
+      const divisor = Math.pow(10, decimalsNum);
       const tokenAmount = amountNum / divisor;
       
       return {
