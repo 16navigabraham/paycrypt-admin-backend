@@ -89,11 +89,15 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Connect to MongoDB
+// Connect to MongoDB with auto-reconnect
 console.log('🔗 Connecting to MongoDB...');
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+  maxPoolSize: 10,
+  minPoolSize: 2
 })
   .then(async () => {
     console.log('✅ MongoDB connected successfully');
@@ -115,6 +119,26 @@ mongoose.connect(process.env.MONGODB_URI, {
     console.error('❌ MongoDB connection error:', err);
     process.exit(1);
   });
+
+// MongoDB connection event handlers
+mongoose.connection.on('connected', () => {
+  console.log('✅ Mongoose connected to MongoDB');
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('❌ Mongoose connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.warn('⚠️  Mongoose disconnected from MongoDB');
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  await mongoose.connection.close();
+  console.log('👋 MongoDB connection closed through app termination');
+  process.exit(0);
+});
 
 // Routes
 app.use('/api/stats', statsRoutes);

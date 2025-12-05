@@ -1,6 +1,8 @@
 const axios = require('axios');
 
 const PRICE_API_URL = process.env.PRICE_API_URL || 'https://paycrypt-margin-price.onrender.com';
+const COINGECKO_API_URL = 'https://api.coingecko.com/api/v3';
+const NGN_USD_RATE = 1500; // Fallback NGN rate if API fails
 
 // Token address to CoinGecko ID mapping
 const TOKEN_ID_MAP = {
@@ -110,9 +112,9 @@ class PriceService {
 
       return response.data;
     } catch (error) {
-      console.error('❌ Error fetching prices from API:', error.message);
+      console.error('❌ Error fetching prices from primary API:', error.message);
       
-      // Return cached prices if available
+      // Try cached prices first
       const cachedPrices = {};
       for (const id of uniqueIds) {
         const cached = this.priceCache.get(id);
@@ -126,6 +128,60 @@ class PriceService {
         return cachedPrices;
       }
       
+      // Fallback to CoinGecko if primary fails and no cache
+      console.log('🔄 Trying CoinGecko as fallback...');
+      try {
+        const coinGeckoData = await this.fetchFromCoinGecko(uniqueIds);
+        if (coinGeckoData && Object.keys(coinGeckoData).length > 0) {
+          console.log('✅ Successfully fetched prices from CoinGecko');
+          // Cache CoinGecko results
+          const timestamp = Date.now();
+          for (const [id, prices] of Object.entries(coinGeckoData)) {
+            this.priceCache.set(id, { prices, timestamp });
+          }
+          return coinGeckoData;
+        }
+      } catch (cgError) {
+        console.error('❌ CoinGecko fallback also failed:', cgError.message);
+      }
+      
+      // Last resort: return stale cache or throw
+      if (Object.keys(cachedPrices).length > 0) {
+        console.log('⚠️  Using stale cache as last resort');
+        return cachedPrices;
+      }
+      
+      throw new Error('All price APIs failed and no cache available');
+    }
+  }
+
+  /**
+   * Fetch prices from CoinGecko directly (fallback)
+   */
+  async fetchFromCoinGecko(coinGeckoIds) {
+    const ids = coinGeckoIds.join(',');
+    
+    try {
+      const response = await axios.get(`${COINGECKO_API_URL}/simple/price`, {
+        params: {
+          ids,
+          vs_currencies: 'usd'
+        },
+        timeout: 15000
+      });
+
+      // Convert to include NGN (approximate)
+      const result = {};
+      for (const [id, prices] of Object.entries(response.data)) {
+        result[id] = {
+          usd: prices.usd,
+          ngn: prices.usd * NGN_USD_RATE // Approximate NGN rate
+        };
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ CoinGecko API error:', error.message);
       throw error;
     }
   }
