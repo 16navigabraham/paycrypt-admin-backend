@@ -65,10 +65,10 @@ async function syncContractMetrics() {
     const chainIds = contractService.getEnabledChainIds();
     console.log(`🔗 Syncing metrics for ${chainIds.length} chain(s): ${chainIds.join(', ')}`);
     
-    // Sync all chains in parallel
-    await Promise.all(
-      chainIds.map(chainId => syncContractMetricsForChain(chainId))
-    );
+    // Sync chains sequentially to avoid RPC rate limiting
+    for (const chainId of chainIds) {
+      await syncContractMetricsForChain(chainId);
+    }
     
     console.log('✅ All chain metrics sync completed');
     
@@ -186,10 +186,10 @@ async function syncOrderHistory() {
     const chainIds = contractService.getEnabledChainIds();
     console.log(`🔗 Syncing orders for ${chainIds.length} chain(s): ${chainIds.join(', ')}`);
     
-    // Sync all chains in parallel
-    await Promise.all(
-      chainIds.map(chainId => syncOrderHistoryForChain(chainId))
-    );
+    // Sync chains sequentially to avoid RPC rate limiting
+    for (const chainId of chainIds) {
+      await syncOrderHistoryForChain(chainId);
+    }
     
     console.log('✅ All chain order history sync completed');
     

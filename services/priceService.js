@@ -27,9 +27,12 @@ class PriceService {
     this.priceCache = new Map();
     this.cacheExpiry = 600000; // 10 minute cache to avoid rate limiting
     this.lastApiCall = 0;
-    this.minTimeBetweenCalls = 60000; // Minimum 60 seconds between API calls (more aggressive rate limiting)
+    this.minTimeBetweenCalls = 2000; // Minimum 2 seconds between API calls
     this.lastCoinGeckoCall = 0;
     this.coinGeckoMinDelay = 120000; // 2 minutes between CoinGecko calls
+    this.retryCount = 0;
+    this.maxRetries = 3;
+    this.retryDelay = 5000; // Initial retry delay: 5 seconds
   }
 
   /**
@@ -58,9 +61,9 @@ class PriceService {
   }
 
   /**
-   * Fetch prices for multiple tokens from the price API
+   * Fetch prices for multiple tokens from the price API with retry logic
    */
-  async fetchPrices(coinGeckoIds) {
+  async fetchPrices(coinGeckoIds, attempt = 1) {
     if (!coinGeckoIds || coinGeckoIds.length === 0) {
       return {};
     }
@@ -90,7 +93,7 @@ class PriceService {
     const timeSinceLastCall = now - this.lastApiCall;
     if (timeSinceLastCall < this.minTimeBetweenCalls) {
       const waitTime = this.minTimeBetweenCalls - timeSinceLastCall;
-      console.log(`⏳ Rate limiting: waiting ${waitTime}ms before API call`);
+      console.log(`⏳ Rate limiting: waiting ${waitTime}ms before API call (attempt ${attempt}/${this.maxRetries})`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
     
@@ -112,9 +115,21 @@ class PriceService {
         this.priceCache.set(id, { prices, timestamp });
       }
 
+      // Reset retry count on success
+      this.retryCount = 0;
       return response.data;
     } catch (error) {
-      console.error('❌ Error fetching prices from primary API:', error.message);
+      console.error(`❌ Error fetching prices from primary API (attempt ${attempt}/${this.maxRetries}):`, error.message);
+      
+      // Check if it's a rate limit error (429) and we haven't exhausted retries
+      const isRateLimitError = error.response?.status === 429 || error.message.includes('429');
+      
+      if (isRateLimitError && attempt < this.maxRetries) {
+        const backoffDelay = this.retryDelay * Math.pow(2, attempt - 1); // Exponential backoff
+        console.log(`⏳ Rate limited! Retrying in ${backoffDelay}ms with exponential backoff...`);
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+        return this.fetchPrices(coinGeckoIds, attempt + 1);
+      }
       
       // Try cached prices first
       const cachedPrices = {};
@@ -130,13 +145,7 @@ class PriceService {
         return cachedPrices;
       }
       
-      // Last resort: return stale cache or throw
-      if (Object.keys(cachedPrices).length > 0) {
-        console.log('⚠️  Using stale cache as last resort');
-        return cachedPrices;
-      }
-      
-      throw new Error('Price API failed and no cache available');
+      throw new Error(`Price API failed after ${attempt} attempts and no cache available`);
     }
   }
 

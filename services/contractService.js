@@ -5,6 +5,8 @@ class ContractService {
   constructor() {
     this.chains = new Map(); // Map of chainId -> { provider, contract, config }
     this.initialized = false;
+    this.lastRpcCall = 0;
+    this.minTimeBetweenRpcCalls = 1000; // 1 second between RPC calls to prevent rate limiting
   }
 
   initialize() {
@@ -73,6 +75,21 @@ class ContractService {
     }));
   }
 
+  /**
+   * Apply rate limiting to prevent RPC call throttling
+   */
+  async applyRpcRateLimit() {
+    const now = Date.now();
+    const timeSinceLastCall = now - this.lastRpcCall;
+    
+    if (timeSinceLastCall < this.minTimeBetweenRpcCalls) {
+      const waitTime = this.minTimeBetweenRpcCalls - timeSinceLastCall;
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+    
+    this.lastRpcCall = Date.now();
+  }
+
   async getContractMetrics(chainId) {
     if (!this.initialized) {
       throw new Error('Contract service not initialized');
@@ -82,6 +99,9 @@ class ContractService {
 
     try {
       console.log(`📊 Fetching contract metrics for ${config.name} (chainId: ${chainId})...`);
+      
+      // Apply rate limiting before making RPC calls
+      await this.applyRpcRateLimit();
       
       const [orderCount, totalVolume, successfulOrders, failedOrders] = await Promise.all([
         contract.getOrderCounter(),
@@ -144,15 +164,20 @@ class ContractService {
     try {
       console.log(`🔍 Fetching OrderCreated events for ${config.name} from block ${fromBlock} to ${toBlock}...`);
       
+      // Apply rate limiting before making RPC calls
+      await this.applyRpcRateLimit();
+      
       const filter = contract.filters.OrderCreated();
       const events = await contract.queryFilter(filter, fromBlock, toBlock);
       
       console.log(`📦 Found ${events.length} OrderCreated events for ${config.name}`);
 
-      const orders = await Promise.all(events.map(async (event) => {
+      const orders = [];
+      for (const event of events) {
         try {
+          await this.applyRpcRateLimit(); // Rate limit between each block fetch
           const block = await event.getBlock();
-          return {
+          orders.push({
             chainId,
             orderId: event.args.orderId.toString(),
             requestId: event.args.requestId,
@@ -162,18 +187,16 @@ class ContractService {
             txnHash: event.transactionHash,
             blockNumber: event.blockNumber,
             timestamp: new Date(block.timestamp * 1000)
-          };
+          });
         } catch (error) {
           console.error(`❌ Error processing event ${event.transactionHash}:`, error);
-          return null;
+          // Continue with next event
         }
-      }));
+      }
 
-      // Filter out null values from failed event processing
-      const validOrders = orders.filter(order => order !== null);
-      console.log(`✅ Successfully processed ${validOrders.length} orders for ${config.name}`);
+      console.log(`✅ Successfully processed ${orders.length} orders for ${config.name}`);
 
-      return validOrders;
+      return orders;
     } catch (error) {
       console.error(`❌ Error fetching OrderCreated events for ${config.name}:`, error);
       throw error;
@@ -188,6 +211,9 @@ class ContractService {
     const { provider, config } = this.getChain(chainId);
     
     try {
+      // Apply rate limiting before making RPC calls
+      await this.applyRpcRateLimit();
+      
       const blockNumber = await provider.getBlockNumber();
       console.log(`📊 Current block number for ${config.name}: ${blockNumber}`);
       return blockNumber;
@@ -222,6 +248,10 @@ class ContractService {
 
     try {
       console.log(`🪙 Fetching supported tokens for ${config.name}...`);
+      
+      // Apply rate limiting before making RPC calls
+      await this.applyRpcRateLimit();
+      
       const tokenAddresses = await contract.getSupportedTokens();
       console.log(`✅ Found ${tokenAddresses.length} supported tokens on ${config.name}`);
       return tokenAddresses;
@@ -239,6 +269,9 @@ class ContractService {
     const { contract, config } = this.getChain(chainId);
 
     try {
+      // Apply rate limiting before making RPC calls
+      await this.applyRpcRateLimit();
+      
       const details = await contract.getTokenDetails(tokenAddress);
       
       return {
