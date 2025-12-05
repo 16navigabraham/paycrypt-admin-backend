@@ -130,71 +130,22 @@ class PriceService {
         return cachedPrices;
       }
       
-      // Fallback to CoinGecko if primary fails and no cache
-      console.log('🔄 Trying CoinGecko as fallback...');
-      try {
-        const coinGeckoData = await this.fetchFromCoinGecko(uniqueIds);
-        if (coinGeckoData && Object.keys(coinGeckoData).length > 0) {
-          console.log('✅ Successfully fetched prices from CoinGecko');
-          // Cache CoinGecko results
-          const timestamp = Date.now();
-          for (const [id, prices] of Object.entries(coinGeckoData)) {
-            this.priceCache.set(id, { prices, timestamp });
-          }
-          return coinGeckoData;
-        }
-      } catch (cgError) {
-        console.error('❌ CoinGecko fallback also failed:', cgError.message);
-      }
-      
       // Last resort: return stale cache or throw
       if (Object.keys(cachedPrices).length > 0) {
         console.log('⚠️  Using stale cache as last resort');
         return cachedPrices;
       }
       
-      throw new Error('All price APIs failed and no cache available');
+      throw new Error('Price API failed and no cache available');
     }
   }
 
   /**
-   * Fetch prices from CoinGecko directly (fallback)
+   * Fetch prices from CoinGecko directly (fallback) - DEPRECATED
+   * Now using only primary price API
    */
   async fetchFromCoinGecko(coinGeckoIds) {
-    // Check rate limiting for CoinGecko
-    const now = Date.now();
-    const timeSinceLastCoinGeckoCall = now - this.lastCoinGeckoCall;
-    if (timeSinceLastCoinGeckoCall < this.coinGeckoMinDelay) {
-      const waitTime = this.coinGeckoMinDelay - timeSinceLastCoinGeckoCall;
-      console.log(`⏳ CoinGecko rate limit: waiting ${Math.round(waitTime / 1000)}s`);      await new Promise(resolve => setTimeout(resolve, waitTime));
-    }
-    
-    const ids = coinGeckoIds.join(',');
-    
-    try {
-      this.lastCoinGeckoCall = Date.now();
-      const response = await axios.get(`${COINGECKO_API_URL}/simple/price`, {
-        params: {
-          ids,
-          vs_currencies: 'usd'
-        },
-        timeout: 15000
-      });
-
-      // Convert to include NGN (approximate)
-      const result = {};
-      for (const [id, prices] of Object.entries(response.data)) {
-        result[id] = {
-          usd: prices.usd,
-          ngn: prices.usd * NGN_USD_RATE // Approximate NGN rate
-        };
-      }
-
-      return result;
-    } catch (error) {
-      console.error('❌ CoinGecko API error:', error.message);
-      throw error;
-    }
+    throw new Error('CoinGecko fallback disabled. Using primary price API only.');
   }
 
   /**
