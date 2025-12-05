@@ -17,6 +17,7 @@ const orderAnalyticsRoutes = require('./routes/orderAnalytics');
 const contractService = require('./services/contractService');
 const { syncContractMetrics, syncOrderHistory, syncTotalVolume } = require('./jobs/cronJobs');
 const runMigration = require('./migrations/fix-syncstatus-index');
+const ensureChainId = require('./migrations/ensure-chainid');
 
 const app = express();
 
@@ -102,11 +103,15 @@ mongoose.connect(process.env.MONGODB_URI, {
   .then(async () => {
     console.log('✅ MongoDB connected successfully');
     
-    // Run database migration on startup (safe to run multiple times)
+    // Run database migrations on startup (safe to run multiple times)
     console.log('🔧 Running database migrations...');
     try {
       await runMigration(mongoose.connection); // Pass existing connection
-      console.log('✅ Database migrations completed');
+      console.log('✅ SyncStatus index migration completed');
+      
+      // Ensure all orders have chainId
+      await ensureChainId();
+      console.log('✅ ChainId migration completed');
     } catch (error) {
       console.warn('⚠️  Migration warning:', error.message);
       console.log('📝 Continuing with startup - migration will retry on next restart');

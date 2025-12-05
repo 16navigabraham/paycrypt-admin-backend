@@ -72,6 +72,15 @@ router.get('/', async (req, res) => {
       Order.countDocuments(query)
     ]);
     
+    // Debug: Log first order to verify chainId is present
+    if (orders.length > 0) {
+      console.log('📦 Sample order from DB:', {
+        orderId: orders[0].orderId,
+        chainId: orders[0].chainId,
+        hasChainId: 'chainId' in orders[0]
+      });
+    }
+    
     res.json({
       orders,
       pagination: {
@@ -137,7 +146,7 @@ router.get('/user/:userWallet', async (req, res) => {
   }
 });
 
-// Get orders by token
+// Get orders by token (MUST be before /:orderId)
 router.get('/token/:tokenAddress', async (req, res) => {
   try {
     const { tokenAddress } = req.params;
@@ -157,11 +166,11 @@ router.get('/token/:tokenAddress', async (req, res) => {
     res.json({
       tokenAddress: tokenAddress.toLowerCase(),
       orders,
-  }
-});
-
-// Get orders by token (MUST be before /:orderId)
-router.get('/token/:tokenAddress', async (req, res) => {
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum)
       }
     });
   } catch (error) {
@@ -172,7 +181,7 @@ router.get('/token/:tokenAddress', async (req, res) => {
   }
 });
 
-// Get orders analytics
+// Get orders analytics (MUST be before /:orderId)
 router.get('/analytics/summary', async (req, res) => {
   try {
     const { range = '24h' } = req.query;
@@ -192,11 +201,11 @@ router.get('/analytics/summary', async (req, res) => {
         {
           $group: {
             _id: null,
-  }
-});
-
-// Get orders analytics (MUST be before /:orderId)
-router.get('/analytics/summary', async (req, res) => {00000000000000000] 
+            totalOrders: { $sum: 1 },
+            totalVolume: { 
+              $sum: { 
+                $toDouble: { 
+                  $divide: [{ $toLong: "$amount" }, 1000000000000000000] 
                 } 
               } 
             },
