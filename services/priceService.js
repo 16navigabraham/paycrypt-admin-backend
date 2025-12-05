@@ -233,8 +233,10 @@ class PriceService {
     }
 
     try {
-      // Convert from wei to token amount
-      const tokenAmount = Number(amount) / Math.pow(10, decimals);
+      // Convert BigInt to Number safely, then convert from wei to token amount
+      const amountNum = typeof amount === 'bigint' ? Number(amount) : Number(amount);
+      const divisor = Math.pow(10, decimals);
+      const tokenAmount = amountNum / divisor;
       
       return {
         tokenAmount,
