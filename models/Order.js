@@ -4,7 +4,12 @@ const orderSchema = new mongoose.Schema({
   orderId: {
     type: String,
     required: true,
-    unique: true,
+    index: true
+  },
+  chainId: {
+    type: Number,
+    required: true,
+    default: 8453, // Default to Base chain
     index: true
   },
   requestId: {
@@ -31,7 +36,6 @@ const orderSchema = new mongoose.Schema({
   txnHash: {
     type: String,
     required: true,
-    unique: true,
     index: true,
     lowercase: true
   },
@@ -54,6 +58,9 @@ orderSchema.index({ userWallet: 1, timestamp: -1 });
 orderSchema.index({ tokenAddress: 1, timestamp: -1 });
 orderSchema.index({ timestamp: -1, blockNumber: -1 });
 orderSchema.index({ timestamp: -1, userWallet: 1 });
+orderSchema.index({ chainId: 1, timestamp: -1 });
+orderSchema.index({ chainId: 1, orderId: 1 }, { unique: true }); // Unique per chain
+orderSchema.index({ chainId: 1, txnHash: 1 }, { unique: true }); // Unique per chain
 
 // Add virtual for formatted amount (assuming 18 decimals for most tokens)
 orderSchema.virtual('formattedAmount').get(function() {
@@ -73,22 +80,34 @@ orderSchema.virtual('formattedAmount').get(function() {
 orderSchema.set('toJSON', { virtuals: true });
 
 // Static method to get recent orders
-orderSchema.statics.getRecentOrders = function(limit = 10) {
-  return this.find({})
+orderSchema.statics.getRecentOrders = function(limit = 10, chainId = null) {
+  const query = chainId ? { chainId } : {};
+  return this.find(query)
     .sort({ timestamp: -1 })
     .limit(limit);
 };
 
 // Static method to get orders by user
-orderSchema.statics.getOrdersByUser = function(userWallet, limit = 50) {
-  return this.find({ userWallet: userWallet.toLowerCase() })
+orderSchema.statics.getOrdersByUser = function(userWallet, limit = 50, chainId = null) {
+  const query = { userWallet: userWallet.toLowerCase() };
+  if (chainId) query.chainId = chainId;
+  return this.find(query)
     .sort({ timestamp: -1 })
     .limit(limit);
 };
 
 // Static method to get orders by token
-orderSchema.statics.getOrdersByToken = function(tokenAddress, limit = 50) {
-  return this.find({ tokenAddress: tokenAddress.toLowerCase() })
+orderSchema.statics.getOrdersByToken = function(tokenAddress, limit = 50, chainId = null) {
+  const query = { tokenAddress: tokenAddress.toLowerCase() };
+  if (chainId) query.chainId = chainId;
+  return this.find(query)
+    .sort({ timestamp: -1 })
+    .limit(limit);
+};
+
+// Static method to get orders by chain
+orderSchema.statics.getOrdersByChain = function(chainId, limit = 50) {
+  return this.find({ chainId })
     .sort({ timestamp: -1 })
     .limit(limit);
 };

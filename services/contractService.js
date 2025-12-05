@@ -1,49 +1,97 @@
 const { ethers } = require('ethers');
-const { CONTRACT_ADDRESS, CONTRACT_ABI } = require('../config/contract');
+const { CONTRACT_ABI, CONTRACTS, getEnabledChains, getContractByChainId } = require('../config/contract');
 
 class ContractService {
   constructor() {
-    this.provider = null;
-    this.contract = null;
+    this.chains = new Map(); // Map of chainId -> { provider, contract, config }
     this.initialized = false;
   }
 
   initialize() {
     try {
-      console.log('🔗 Initializing contract service...');
+      console.log('🔗 Initializing multi-chain contract service...');
       
-      if (!process.env.RPC_URL) {
-        throw new Error('RPC_URL not provided in environment variables');
+      const enabledChains = getEnabledChains();
+      
+      if (enabledChains.length === 0) {
+        throw new Error('No RPC URLs configured. Please set at least one of: BASE_RPC_URL, LISK_RPC_URL, CELO_RPC_URL');
       }
 
-      this.provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-      this.contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, this.provider);
+      // Initialize each enabled chain
+      for (const chain of enabledChains) {
+        try {
+          console.log(`🔗 Initializing ${chain.name} (chainId: ${chain.chainId})...`);
+          
+          const provider = new ethers.JsonRpcProvider(chain.rpcUrl);
+          const contract = new ethers.Contract(chain.address, CONTRACT_ABI, provider);
+          
+          this.chains.set(chain.chainId, {
+            provider,
+            contract,
+            config: chain
+          });
+          
+          console.log(`✅ ${chain.name} initialized successfully`);
+          console.log(`   Contract: ${chain.address}`);
+          console.log(`   Explorer: ${chain.explorer}`);
+        } catch (error) {
+          console.error(`❌ Failed to initialize ${chain.name}:`, error.message);
+          // Continue with other chains
+        }
+      }
+
+      if (this.chains.size === 0) {
+        throw new Error('Failed to initialize any blockchain connections');
+      }
+
       this.initialized = true;
-      
-      console.log('✅ Contract service initialized successfully');
-      console.log(`📋 Contract Address: ${CONTRACT_ADDRESS}`);
+      console.log(`✅ Contract service initialized with ${this.chains.size} chain(s)`);
     } catch (error) {
       console.error('❌ Failed to initialize contract service:', error);
       throw error;
     }
   }
 
-  async getContractMetrics() {
+  getChain(chainId) {
+    const chain = this.chains.get(chainId);
+    if (!chain) {
+      throw new Error(`Chain ${chainId} not initialized or not supported`);
+    }
+    return chain;
+  }
+
+  getEnabledChainIds() {
+    return Array.from(this.chains.keys());
+  }
+
+  getAllChains() {
+    return Array.from(this.chains.entries()).map(([chainId, chain]) => ({
+      chainId,
+      name: chain.config.name,
+      address: chain.config.address,
+      explorer: chain.config.explorer
+    }));
+  }
+
+  async getContractMetrics(chainId) {
     if (!this.initialized) {
       throw new Error('Contract service not initialized');
     }
 
+    const { contract, config } = this.getChain(chainId);
+
     try {
-      console.log('📊 Fetching contract metrics...');
+      console.log(`📊 Fetching contract metrics for ${config.name} (chainId: ${chainId})...`);
       
       const [orderCount, totalVolume, successfulOrders, failedOrders] = await Promise.all([
-        this.contract.getOrderCounter(),
-        this.contract.getTotalVolume(),
-        this.contract.getTotalSuccessfulOrders(),
-        this.contract.getTotalFailedOrders()
+        contract.getOrderCounter(),
+        contract.getTotalVolume(),
+        contract.getTotalSuccessfulOrders(),
+        contract.getTotalFailedOrders()
       ]);
 
       const metrics = {
+        chainId,
         orderCount: orderCount.toString(),
         totalVolume: totalVolume.toString(),
         successfulOrders: successfulOrders.toString(),
@@ -51,7 +99,7 @@ class ContractService {
         timestamp: new Date()
       };
 
-      console.log('✅ Contract metrics fetched:', {
+      console.log(`✅ Contract metrics fetched for ${config.name}:`, {
         orderCount: metrics.orderCount,
         totalVolume: metrics.totalVolume,
         successfulOrders: metrics.successfulOrders,
@@ -60,28 +108,52 @@ class ContractService {
 
       return metrics;
     } catch (error) {
-      console.error('❌ Error fetching contract metrics:', error);
+      console.error(`❌ Error fetching contract metrics for ${config.name}:`, error);
       throw error;
     }
   }
 
-  async getOrderCreatedEvents(fromBlock = 0, toBlock = 'latest') {
+  async getAllContractMetrics() {
     if (!this.initialized) {
       throw new Error('Contract service not initialized');
     }
 
+    const allMetrics = [];
+    const chainIds = this.getEnabledChainIds();
+
+    for (const chainId of chainIds) {
+      try {
+        const metrics = await this.getContractMetrics(chainId);
+        allMetrics.push(metrics);
+      } catch (error) {
+        console.error(`Failed to fetch metrics for chain ${chainId}:`, error.message);
+        // Continue with other chains
+      }
+    }
+
+    return allMetrics;
+  }
+
+  async getOrderCreatedEvents(chainId, fromBlock = 0, toBlock = 'latest') {
+    if (!this.initialized) {
+      throw new Error('Contract service not initialized');
+    }
+
+    const { contract, provider, config } = this.getChain(chainId);
+
     try {
-      console.log(`🔍 Fetching OrderCreated events from block ${fromBlock} to ${toBlock}...`);
+      console.log(`🔍 Fetching OrderCreated events for ${config.name} from block ${fromBlock} to ${toBlock}...`);
       
-      const filter = this.contract.filters.OrderCreated();
-      const events = await this.contract.queryFilter(filter, fromBlock, toBlock);
+      const filter = contract.filters.OrderCreated();
+      const events = await contract.queryFilter(filter, fromBlock, toBlock);
       
-      console.log(`📦 Found ${events.length} OrderCreated events`);
+      console.log(`📦 Found ${events.length} OrderCreated events for ${config.name}`);
 
       const orders = await Promise.all(events.map(async (event) => {
         try {
           const block = await event.getBlock();
           return {
+            chainId,
             orderId: event.args.orderId.toString(),
             requestId: event.args.requestId,
             userWallet: event.args.user.toLowerCase(),
@@ -99,42 +171,140 @@ class ContractService {
 
       // Filter out null values from failed event processing
       const validOrders = orders.filter(order => order !== null);
-      console.log(`✅ Successfully processed ${validOrders.length} orders`);
+      console.log(`✅ Successfully processed ${validOrders.length} orders for ${config.name}`);
 
       return validOrders;
     } catch (error) {
-      console.error('❌ Error fetching OrderCreated events:', error);
+      console.error(`❌ Error fetching OrderCreated events for ${config.name}:`, error);
       throw error;
     }
   }
 
-  async getCurrentBlockNumber() {
+  async getCurrentBlockNumber(chainId) {
     if (!this.initialized) {
       throw new Error('Contract service not initialized');
     }
+
+    const { provider, config } = this.getChain(chainId);
     
     try {
-      const blockNumber = await this.provider.getBlockNumber();
-      console.log(`📊 Current block number: ${blockNumber}`);
+      const blockNumber = await provider.getBlockNumber();
+      console.log(`📊 Current block number for ${config.name}: ${blockNumber}`);
       return blockNumber;
     } catch (error) {
-      console.error('❌ Error fetching current block number:', error);
+      console.error(`❌ Error fetching current block number for ${config.name}:`, error);
       throw error;
     }
   }
 
-  async getBlockTimestamp(blockNumber) {
+  async getBlockTimestamp(chainId, blockNumber) {
     if (!this.initialized) {
       throw new Error('Contract service not initialized');
     }
+
+    const { provider, config } = this.getChain(chainId);
     
     try {
-      const block = await this.provider.getBlock(blockNumber);
+      const block = await provider.getBlock(blockNumber);
       return new Date(block.timestamp * 1000);
     } catch (error) {
-      console.error(`❌ Error fetching block ${blockNumber} timestamp:`, error);
+      console.error(`❌ Error fetching block ${blockNumber} timestamp for ${config.name}:`, error);
       throw error;
     }
+  }
+
+  async getSupportedTokens(chainId) {
+    if (!this.initialized) {
+      throw new Error('Contract service not initialized');
+    }
+
+    const { contract, config } = this.getChain(chainId);
+
+    try {
+      console.log(`🪙 Fetching supported tokens for ${config.name}...`);
+      const tokenAddresses = await contract.getSupportedTokens();
+      console.log(`✅ Found ${tokenAddresses.length} supported tokens on ${config.name}`);
+      return tokenAddresses;
+    } catch (error) {
+      console.error(`❌ Error fetching supported tokens for ${config.name}:`, error);
+      throw error;
+    }
+  }
+
+  async getTokenDetails(chainId, tokenAddress) {
+    if (!this.initialized) {
+      throw new Error('Contract service not initialized');
+    }
+
+    const { contract, config } = this.getChain(chainId);
+
+    try {
+      const details = await contract.getTokenDetails(tokenAddress);
+      
+      return {
+        tokenAddress: details.tokenAddress,
+        orderLimit: details.orderLimit.toString(),
+        totalVolume: details.totalVolume.toString(),
+        successfulOrders: details.successfulOrders.toString(),
+        failedOrders: details.failedOrders.toString(),
+        name: details.name,
+        decimals: details.decimals,
+        isActive: details.isActive
+      };
+    } catch (error) {
+      console.error(`❌ Error fetching token details for ${tokenAddress} on ${config.name}:`, error);
+      throw error;
+    }
+  }
+
+  async getAllTokensWithDetails(chainId) {
+    if (!this.initialized) {
+      throw new Error('Contract service not initialized');
+    }
+
+    try {
+      const tokenAddresses = await this.getSupportedTokens(chainId);
+      const tokensWithDetails = [];
+
+      for (const tokenAddress of tokenAddresses) {
+        try {
+          const details = await this.getTokenDetails(chainId, tokenAddress);
+          tokensWithDetails.push({
+            chainId,
+            ...details
+          });
+        } catch (error) {
+          console.error(`⚠️  Failed to get details for token ${tokenAddress}:`, error.message);
+          // Continue with other tokens
+        }
+      }
+
+      return tokensWithDetails;
+    } catch (error) {
+      console.error(`❌ Error fetching all tokens with details:`, error);
+      throw error;
+    }
+  }
+
+  async getAllTokensAcrossChains() {
+    if (!this.initialized) {
+      throw new Error('Contract service not initialized');
+    }
+
+    const chainIds = this.getEnabledChainIds();
+    const allTokens = [];
+
+    for (const chainId of chainIds) {
+      try {
+        const tokens = await this.getAllTokensWithDetails(chainId);
+        allTokens.push(...tokens);
+      } catch (error) {
+        console.error(`Failed to fetch tokens for chain ${chainId}:`, error.message);
+        // Continue with other chains
+      }
+    }
+
+    return allTokens;
   }
 
   isInitialized() {

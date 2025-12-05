@@ -10,10 +10,12 @@ require('dotenv').config();
 const statsRoutes = require('./routes/stats');
 const ordersRoutes = require('./routes/orders');
 const adminRoutes = require('./routes/admin');
+const volumeRoutes = require('./routes/volume');
+const orderAnalyticsRoutes = require('./routes/orderAnalytics');
 
 // Import services
 const contractService = require('./services/contractService');
-const { syncContractMetrics, syncOrderHistory } = require('./jobs/cronJobs');
+const { syncContractMetrics, syncOrderHistory, syncTotalVolume } = require('./jobs/cronJobs');
 
 const app = express();
 
@@ -106,15 +108,16 @@ mongoose.connect(process.env.MONGODB_URI, {
 app.use('/api/stats', statsRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/volume', volumeRoutes);
+app.use('/api/order-analytics', orderAnalyticsRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({ 
-    message: 'Paycrypt Admin Backend API - Base Chain',
-    version: '1.0.0',
-    chain: 'Base Mainnet',
-    contract: '0x0574A0941Ca659D01CF7370E37492bd2DF43128d',
-    endpoints: ['/api/stats', '/api/orders', '/api/admin', '/health']
+    message: 'Paycrypt Admin Backend API - Multi-Chain',
+    version: '2.0.0',
+    chains: ['Base', 'Lisk', 'Celo'],
+    endpoints: ['/api/stats', '/api/orders', '/api/admin', '/api/volume', '/api/order-analytics', '/health']
   });
 });
 
@@ -161,6 +164,14 @@ if (process.env.NODE_ENV === 'production' || process.env.ENABLE_CRON === 'true')
     });
   });
 
+  // Every 15 minutes: sync total volume
+  cron.schedule('*/15 * * * *', () => {
+    console.log('⏰ Running 15-minute total volume sync...');
+    syncTotalVolume().catch(error => {
+      console.error('❌ Cron volume sync error:', error);
+    });
+  });
+
   // Run initial sync after 30 seconds (only in production)
   if (process.env.NODE_ENV === 'production') {
     setTimeout(() => {
@@ -169,6 +180,9 @@ if (process.env.NODE_ENV === 'production' || process.env.ENABLE_CRON === 'true')
       setTimeout(() => {
         syncOrderHistory().catch(console.error);
       }, 5000); // Stagger the syncs
+      setTimeout(() => {
+        syncTotalVolume().catch(console.error);
+      }, 10000); // Stagger more
     }, 30000);
   }
 } else {

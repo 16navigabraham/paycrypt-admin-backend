@@ -9,7 +9,8 @@ router.get('/', async (req, res) => {
     const { 
       range, 
       user, 
-      token, 
+      token,
+      chainId,
       page = 1, 
       limit = 50,
       sortBy = 'timestamp',
@@ -18,6 +19,11 @@ router.get('/', async (req, res) => {
     
     // Build query
     let query = {};
+    
+    // Add chainId filter
+    if (chainId) {
+      query.chainId = parseInt(chainId);
+    }
     
     // Add time range filter
     if (range) {
@@ -74,6 +80,7 @@ router.get('/', async (req, res) => {
         hasPrev: pageNum > 1
       },
       filters: {
+        chainId: chainId ? parseInt(chainId) : null,
         range: range || null,
         user: user || null,
         token: token || null

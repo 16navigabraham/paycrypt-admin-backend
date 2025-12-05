@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const contractMetricsSchema = new mongoose.Schema({
+  chainId: {
+    type: Number,
+    required: true,
+    default: 8453, // Default to Base chain
+    index: true
+  },
   orderCount: {
     type: String,
     required: true
@@ -31,6 +37,10 @@ contractMetricsSchema.index({ timestamp: -1 });
 
 // Compound index for range queries
 contractMetricsSchema.index({ timestamp: 1, orderCount: 1 });
+
+// Multi-chain indexes
+contractMetricsSchema.index({ chainId: 1, timestamp: -1 });
+contractMetricsSchema.index({ chainId: 1, timestamp: 1 });
 
 // Add virtual for success rate
 contractMetricsSchema.virtual('successRate').get(function() {

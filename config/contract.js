@@ -1,4 +1,53 @@
-const CONTRACT_ADDRESS = "0x0574A0941Ca659D01CF7370E37492bd2DF43128d";
+// Multi-chain contract configuration
+const CONTRACTS = {
+  base: {
+    chainId: 8453,
+    name: 'Base',
+    address: '0x0574A0941Ca659D01CF7370E37492bd2DF43128d',
+    explorer: 'https://basescan.org',
+    rpcUrl: process.env.BASE_RPC_URL || process.env.RPC_URL
+  },
+  lisk: {
+    chainId: 1135,
+    name: 'Lisk',
+    address: '0x7Ca0a469164655AF07d27cf4bdA5e77F36Ab820A',
+    explorer: 'https://blockscout.lisk.com',
+    rpcUrl: process.env.LISK_RPC_URL
+  },
+  celo: {
+    chainId: 42220,
+    name: 'Celo',
+    address: '0xBC955DC38a13c2Cd8736DA1bC791514504202F9D',
+    explorer: 'https://celoscan.io',
+    rpcUrl: process.env.CELO_RPC_URL
+  }
+};
+
+// Default to Base for backward compatibility
+const CONTRACT_ADDRESS = CONTRACTS.base.address;
+
+// Helper function to get contract config by chain ID
+function getContractByChainId(chainId) {
+  const chain = Object.values(CONTRACTS).find(c => c.chainId === chainId);
+  return chain || CONTRACTS.base;
+}
+
+// Helper function to get contract address by chain ID
+function getContractAddress(chainId) {
+  return getContractByChainId(chainId).address;
+}
+
+// Helper function to get explorer URL by chain ID
+function getExplorerUrl(chainId) {
+  return getContractByChainId(chainId).explorer;
+}
+
+// Helper function to get all enabled chains
+function getEnabledChains() {
+  return Object.entries(CONTRACTS)
+    .filter(([key, config]) => config.rpcUrl)
+    .map(([key, config]) => ({ key, ...config }));
+}
 
 const CONTRACT_ABI = [
   {
@@ -145,5 +194,10 @@ const CONTRACT_ABI = [
 
 module.exports = {
   CONTRACT_ADDRESS,
-  CONTRACT_ABI
+  CONTRACT_ABI,
+  CONTRACTS,
+  getContractByChainId,
+  getContractAddress,
+  getExplorerUrl,
+  getEnabledChains
 };

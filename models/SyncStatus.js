@@ -4,8 +4,12 @@ const syncStatusSchema = new mongoose.Schema({
   syncType: {
     type: String,
     required: true,
-    enum: ['metrics', 'orders'],
-    unique: true
+    enum: ['metrics', 'orders']
+  },
+  chainId: {
+    type: Number,
+    required: true,
+    default: 8453 // Default to Base chain
   },
   lastSyncBlock: {
     type: Number,
@@ -36,21 +40,22 @@ const syncStatusSchema = new mongoose.Schema({
 });
 
 // Index for efficient queries
-syncStatusSchema.index({ syncType: 1 });
+syncStatusSchema.index({ syncType: 1, chainId: 1 }, { unique: true });
 syncStatusSchema.index({ lastSyncTimestamp: -1 });
+syncStatusSchema.index({ chainId: 1 });
 
 // Static method to get or create sync status
-syncStatusSchema.statics.getOrCreate = async function(syncType) {
+syncStatusSchema.statics.getOrCreate = async function(syncType, chainId = 8453) {
   try {
-    let syncStatus = await this.findOne({ syncType });
+    let syncStatus = await this.findOne({ syncType, chainId });
     if (!syncStatus) {
-      syncStatus = new this({ syncType });
+      syncStatus = new this({ syncType, chainId });
       await syncStatus.save();
-      console.log(`📊 Created new sync status for: ${syncType}`);
+      console.log(`📊 Created new sync status for: ${syncType} on chainId ${chainId}`);
     }
     return syncStatus;
   } catch (error) {
-    console.error(`❌ Error getting/creating sync status for ${syncType}:`, error);
+    console.error(`❌ Error getting/creating sync status for ${syncType} on chainId ${chainId}:`, error);
     throw error;
   }
 };
@@ -70,9 +75,9 @@ syncStatusSchema.methods.updateSync = async function(block, success = true, erro
     }
     
     await this.save();
-    console.log(`✅ Updated sync status for ${this.syncType}: block ${block}`);
+    console.log(`✅ Updated sync status for ${this.syncType} on chainId ${this.chainId}: block ${block}`);
   } catch (err) {
-    console.error(`❌ Error updating sync status for ${this.syncType}:`, err);
+    console.error(`❌ Error updating sync status for ${this.syncType} on chainId ${this.chainId}:`, err);
     throw err;
   }
 };

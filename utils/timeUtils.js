@@ -1,6 +1,21 @@
 // Time utility functions for parsing ranges and formatting
 
+// Standard time periods in milliseconds
+const TIME_PERIODS = {
+  '12h': 12 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  'day': 24 * 60 * 60 * 1000,
+  'month': 30 * 24 * 60 * 60 * 1000,
+  'year': 365 * 24 * 60 * 60 * 1000
+};
+
 function parseTimeRange(range) {
+  // Check if it's a standard period
+  if (TIME_PERIODS[range]) {
+    return TIME_PERIODS[range];
+  }
+
+  // Parse custom format (e.g., 7d, 3h)
   const units = {
     'h': 60 * 60 * 1000,      // hours
     'd': 24 * 60 * 60 * 1000, // days

@@ -7,7 +7,7 @@ const { getStartTime, isValidTimeRange } = require('../utils/timeUtils');
 // Get current stats from contract or historical data
 router.get('/', async (req, res) => {
   try {
-    const { range } = req.query;
+    const { range, chainId } = req.query;
     
     if (range) {
       // Return historical data
@@ -18,15 +18,21 @@ router.get('/', async (req, res) => {
       }
 
       const startTime = getStartTime(range);
-      const metrics = await ContractMetrics.find({
-        timestamp: { $gte: startTime }
-      })
-      .sort({ timestamp: -1 })
-      .limit(1000); // Limit to prevent huge responses
+      const query = { timestamp: { $gte: startTime } };
+      
+      // Add chainId filter if provided
+      if (chainId) {
+        query.chainId = parseInt(chainId);
+      }
+      
+      const metrics = await ContractMetrics.find(query)
+        .sort({ timestamp: -1 })
+        .limit(1000); // Limit to prevent huge responses
 
       if (metrics.length === 0) {
         return res.json({
           range,
+          chainId: chainId ? parseInt(chainId) : null,
           message: 'No data available for the specified time range',
           data: [],
           count: 0
@@ -38,6 +44,7 @@ router.get('/', async (req, res) => {
       
       res.json({
         range,
+        chainId: chainId ? parseInt(chainId) : null,
         aggregates,
         data: metrics,
         count: metrics.length
@@ -50,8 +57,15 @@ router.get('/', async (req, res) => {
         });
       }
       
-      const currentStats = await contractService.getContractMetrics();
-      res.json(currentStats);
+      if (chainId) {
+        // Get stats for specific chain
+        const currentStats = await contractService.getContractMetrics(parseInt(chainId));
+        res.json(currentStats);
+      } else {
+        // Get stats for all chains
+        const allStats = await contractService.getAllContractMetrics();
+        res.json(allStats);
+      }
     }
   } catch (error) {
     console.error('❌ Error fetching stats:', error);
@@ -228,5 +242,28 @@ function calculateAverageOrdersPerHour(metrics) {
   
   return timeDiffHours > 0 ? Number((orderDiff / timeDiffHours).toFixed(2)) : 0;
 }
+
+// Get information about supported chains
+router.get('/chains', async (req, res) => {
+  try {
+    if (!contractService.isInitialized()) {
+      return res.status(503).json({ 
+        error: 'Contract service not initialized' 
+      });
+    }
+    
+    const chains = contractService.getAllChains();
+    res.json({
+      chains,
+      count: chains.length
+    });
+  } catch (error) {
+    console.error('❌ Error fetching chains:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch chains information',
+      message: error.message
+    });
+  }
+});
 
 module.exports = router;
