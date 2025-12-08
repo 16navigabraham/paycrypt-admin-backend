@@ -164,19 +164,70 @@ class ContractService {
     try {
       console.log(`🔍 Fetching OrderCreated events for ${config.name} from block ${fromBlock} to ${toBlock}...`);
       
-      // Apply rate limiting before making RPC calls
-      await this.applyRpcRateLimit();
+      // Get actual block number if using 'latest'
+      let actualToBlock = toBlock;
+      if (toBlock === 'latest') {
+        await this.applyRpcRateLimit();
+        actualToBlock = await provider.getBlockNumber();
+      }
       
-      const filter = contract.filters.OrderCreated();
-      const events = await contract.queryFilter(filter, fromBlock, toBlock);
+      // Fetch events in smaller batches to ensure complete results (especially on Celo)
+      const events = [];
+      const batchSize = 5000; // Reduced from potential larger ranges for reliability
+      const rangeSize = actualToBlock - fromBlock;
       
-      console.log(`📦 Found ${events.length} OrderCreated events for ${config.name}`);
-
+      if (rangeSize > batchSize) {
+        console.log(`📦 Large block range (${rangeSize} blocks), fetching in batches of ${batchSize}...`);
+        
+        for (let start = fromBlock; start <= actualToBlock; start += batchSize) {
+          const end = Math.min(start + batchSize - 1, actualToBlock);
+          
+          try {
+            await this.applyRpcRateLimit();
+            const filter = contract.filters.OrderCreated();
+            const batchEvents = await contract.queryFilter(filter, start, end);
+            
+            console.log(`📦 Batch [${start}-${end}]: Found ${batchEvents.length} events`);
+            events.push(...batchEvents);
+            
+            // Additional delay between batches for Celo (slower RPC)
+            if (config.chainId === 42220) { // Celo
+              await new Promise(resolve => setTimeout(resolve, 200));
+            }
+          } catch (error) {
+            console.error(`⚠️  Error fetching batch [${start}-${end}]:`, error.message);
+            // Continue with next batch instead of throwing
+          }
+        }
+      } else {
+        // For small ranges, fetch all at once
+        await this.applyRpcRateLimit();
+        const filter = contract.filters.OrderCreated();
+        const result = await contract.queryFilter(filter, fromBlock, actualToBlock);
+        events.push(...result);
+        console.log(`📦 Found ${events.length} OrderCreated events in single query`);
+      }
+      
+      // Create a cache of block timestamps to avoid fetching each block
+      const blockTimestampCache = new Map();
+      
       const orders = [];
       for (const event of events) {
         try {
-          await this.applyRpcRateLimit(); // Rate limit between each block fetch
-          const block = await event.getBlock();
+          const blockNum = event.blockNumber;
+          let timestamp;
+          
+          // Check cache first
+          if (blockTimestampCache.has(blockNum)) {
+            timestamp = blockTimestampCache.get(blockNum);
+          } else {
+            // Fetch block timestamp
+            await this.applyRpcRateLimit();
+            const block = await event.getBlock();
+            timestamp = new Date(block.timestamp * 1000);
+            blockTimestampCache.set(blockNum, timestamp);
+          }
+          
           orders.push({
             chainId,
             orderId: event.args.orderId.toString(),
@@ -186,7 +237,7 @@ class ContractService {
             amount: event.args.amount.toString(),
             txnHash: event.transactionHash,
             blockNumber: event.blockNumber,
-            timestamp: new Date(block.timestamp * 1000)
+            timestamp: timestamp
           });
         } catch (error) {
           console.error(`❌ Error processing event ${event.transactionHash}:`, error);
@@ -194,7 +245,7 @@ class ContractService {
         }
       }
 
-      console.log(`✅ Successfully processed ${orders.length} orders for ${config.name}`);
+      console.log(`✅ Successfully processed ${orders.length} orders for ${config.name} (fetched ${events.length} events)`);
 
       return orders;
     } catch (error) {

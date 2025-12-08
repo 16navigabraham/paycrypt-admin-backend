@@ -115,8 +115,9 @@ async function syncOrderHistoryForChain(chainId) {
     
     console.log(`🔍 Syncing orders for chainId ${chainId} from block ${fromBlock} to ${currentBlock}`);
     
-    // Fetch order events in batches to avoid RPC limits
-    const batchSize = 10000;
+    // Fetch order events in smaller batches to avoid missing events on slower RPC providers (especially Celo)
+    // Using smaller batches ensures we get complete event logs even on rate-limited chains
+    const batchSize = 5000; // Reduced batch size for better reliability on Celo
     let processedOrders = 0;
     
     for (let start = fromBlock; start <= currentBlock; start += batchSize) {
@@ -127,8 +128,13 @@ async function syncOrderHistoryForChain(chainId) {
       try {
         const orders = await contractService.getOrderCreatedEvents(chainId, start, end);
         
+        console.log(`✅ Batch [${start}-${end}]: Retrieved ${orders.length} orders from blockchain`);
+        
         if (orders.length > 0) {
           // Save orders to database (handle duplicates)
+          let savedCount = 0;
+          let duplicateCount = 0;
+          
           for (const orderData of orders) {
             try {
               await Order.findOneAndUpdate(
@@ -137,19 +143,26 @@ async function syncOrderHistoryForChain(chainId) {
                 { upsert: true, new: true }
               );
               processedOrders++;
+              savedCount++;
             } catch (error) {
               // Handle duplicate key errors gracefully
               if (error.code === 11000) {
                 console.log(`⚠️  Order ${orderData.orderId} on chainId ${chainId} already exists, skipping...`);
+                duplicateCount++;
               } else {
                 console.error(`❌ Error saving order ${orderData.orderId} on chainId ${chainId}:`, error);
               }
             }
           }
+          
+          console.log(`📝 Batch [${start}-${end}]: Saved ${savedCount} new orders, ${duplicateCount} duplicates skipped`);
+        } else {
+          console.log(`📝 Batch [${start}-${end}]: No new orders found`);
         }
         
-        // Small delay to avoid overwhelming the RPC
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Slightly longer delay for Celo due to slower RPC
+        const delayMs = chainId === 42220 ? 200 : 100;
+        await new Promise(resolve => setTimeout(resolve, delayMs));
         
       } catch (error) {
         console.error(`❌ Error processing blocks ${start}-${end} for chainId ${chainId}:`, error);
