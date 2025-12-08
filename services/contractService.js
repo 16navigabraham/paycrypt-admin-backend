@@ -6,7 +6,9 @@ class ContractService {
     this.chains = new Map(); // Map of chainId -> { provider, contract, config }
     this.initialized = false;
     this.lastRpcCall = 0;
-    this.minTimeBetweenRpcCalls = 1000; // 1 second between RPC calls to prevent rate limiting
+    this.minTimeBetweenRpcCalls = 2000; // 2 seconds between RPC calls for Alchemy free tier
+    this.rpcCallQueue = []; // Queue to enforce sequential RPC calls
+    this.isProcessingQueue = false;
   }
 
   initialize() {
@@ -77,6 +79,7 @@ class ContractService {
 
   /**
    * Apply rate limiting to prevent RPC call throttling
+   * Much more aggressive to avoid "over rate limit" errors on Alchemy free tier
    */
   async applyRpcRateLimit() {
     const now = Date.now();
@@ -90,6 +93,29 @@ class ContractService {
     this.lastRpcCall = Date.now();
   }
 
+  /**
+   * Execute RPC call with retry logic for rate limit errors
+   */
+  async executeRpcCall(fn, retryCount = 0, maxRetries = 3) {
+    try {
+      await this.applyRpcRateLimit();
+      return await fn();
+    } catch (error) {
+      // Check if this is a rate limit error
+      const isRateLimit = error.message?.includes('over rate limit') || 
+                          error.code === 'CALL_EXCEPTION' ||
+                          error.reason?.includes('rate');
+      
+      if (isRateLimit && retryCount < maxRetries) {
+        const backoffMs = 3000 * Math.pow(2, retryCount); // 3s, 6s, 12s
+        console.log(`⏳ Rate limit hit, retrying in ${backoffMs}ms (attempt ${retryCount + 1}/${maxRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+        return this.executeRpcCall(fn, retryCount + 1, maxRetries);
+      }
+      throw error;
+    }
+  }
+
   async getContractMetrics(chainId) {
     if (!this.initialized) {
       throw new Error('Contract service not initialized');
@@ -100,15 +126,11 @@ class ContractService {
     try {
       console.log(`📊 Fetching contract metrics for ${config.name} (chainId: ${chainId})...`);
       
-      // Apply rate limiting before making RPC calls
-      await this.applyRpcRateLimit();
-      
-      const [orderCount, totalVolume, successfulOrders, failedOrders] = await Promise.all([
-        contract.getOrderCounter(),
-        contract.getTotalVolume(),
-        contract.getTotalSuccessfulOrders(),
-        contract.getTotalFailedOrders()
-      ]);
+      // Make RPC calls sequentially instead of parallel to avoid rate limiting
+      const orderCount = await this.executeRpcCall(() => contract.getOrderCounter());
+      const totalVolume = await this.executeRpcCall(() => contract.getTotalVolume());
+      const successfulOrders = await this.executeRpcCall(() => contract.getTotalSuccessfulOrders());
+      const failedOrders = await this.executeRpcCall(() => contract.getTotalFailedOrders());
 
       const metrics = {
         chainId,
@@ -167,8 +189,7 @@ class ContractService {
       // Get actual block number if using 'latest'
       let actualToBlock = toBlock;
       if (toBlock === 'latest') {
-        await this.applyRpcRateLimit();
-        actualToBlock = await provider.getBlockNumber();
+        actualToBlock = await this.executeRpcCall(() => provider.getBlockNumber());
       }
       
       // Fetch events in smaller batches to ensure complete results (especially on Celo)
@@ -183,9 +204,10 @@ class ContractService {
           const end = Math.min(start + batchSize - 1, actualToBlock);
           
           try {
-            await this.applyRpcRateLimit();
             const filter = contract.filters.OrderCreated();
-            const batchEvents = await contract.queryFilter(filter, start, end);
+            const batchEvents = await this.executeRpcCall(
+              () => contract.queryFilter(filter, start, end)
+            );
             
             console.log(`📦 Batch [${start}-${end}]: Found ${batchEvents.length} events`);
             events.push(...batchEvents);
@@ -201,9 +223,10 @@ class ContractService {
         }
       } else {
         // For small ranges, fetch all at once
-        await this.applyRpcRateLimit();
         const filter = contract.filters.OrderCreated();
-        const result = await contract.queryFilter(filter, fromBlock, actualToBlock);
+        const result = await this.executeRpcCall(
+          () => contract.queryFilter(filter, fromBlock, actualToBlock)
+        );
         events.push(...result);
         console.log(`📦 Found ${events.length} OrderCreated events in single query`);
       }
@@ -221,9 +244,8 @@ class ContractService {
           if (blockTimestampCache.has(blockNum)) {
             timestamp = blockTimestampCache.get(blockNum);
           } else {
-            // Fetch block timestamp
-            await this.applyRpcRateLimit();
-            const block = await event.getBlock();
+            // Fetch block timestamp with retry logic
+            const block = await this.executeRpcCall(() => event.getBlock());
             timestamp = new Date(block.timestamp * 1000);
             blockTimestampCache.set(blockNum, timestamp);
           }
@@ -262,10 +284,7 @@ class ContractService {
     const { provider, config } = this.getChain(chainId);
     
     try {
-      // Apply rate limiting before making RPC calls
-      await this.applyRpcRateLimit();
-      
-      const blockNumber = await provider.getBlockNumber();
+      const blockNumber = await this.executeRpcCall(() => provider.getBlockNumber());
       console.log(`📊 Current block number for ${config.name}: ${blockNumber}`);
       return blockNumber;
     } catch (error) {
@@ -300,10 +319,7 @@ class ContractService {
     try {
       console.log(`🪙 Fetching supported tokens for ${config.name}...`);
       
-      // Apply rate limiting before making RPC calls
-      await this.applyRpcRateLimit();
-      
-      const tokenAddresses = await contract.getSupportedTokens();
+      const tokenAddresses = await this.executeRpcCall(() => contract.getSupportedTokens());
       console.log(`✅ Found ${tokenAddresses.length} supported tokens on ${config.name}`);
       return tokenAddresses;
     } catch (error) {
@@ -320,10 +336,7 @@ class ContractService {
     const { contract, config } = this.getChain(chainId);
 
     try {
-      // Apply rate limiting before making RPC calls
-      await this.applyRpcRateLimit();
-      
-      const details = await contract.getTokenDetails(tokenAddress);
+      const details = await this.executeRpcCall(() => contract.getTokenDetails(tokenAddress));
       
       return {
         tokenAddress: details.tokenAddress,
