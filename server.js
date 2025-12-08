@@ -80,14 +80,83 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Health check endpoint (before other routes)
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    chain: 'Base',
-    contract: '0x0574A0941Ca659D01CF7370E37492bd2DF43128d'
-  });
+app.get('/health', async (req, res) => {
+  try {
+    const contractService = require('./services/contractService');
+    const SyncStatus = require('./models/SyncStatus');
+    
+    // Get all enabled chains
+    const enabledChains = contractService.getEnabledChainIds ? 
+      contractService.getEnabledChainIds().map(chainId => {
+        const chainConfig = contractService.getAllChains().find(c => c.chainId === chainId);
+        return chainConfig;
+      }) : [];
+
+    // Fetch latest sync status for all chains
+    const syncStatuses = {};
+    for (const chain of enabledChains) {
+      try {
+        const metricsSyncStatus = await SyncStatus.findOne({ type: 'metrics', chainId: chain.chainId });
+        const ordersSyncStatus = await SyncStatus.findOne({ type: 'orders', chainId: chain.chainId });
+        
+        syncStatuses[chain.name] = {
+          chainId: chain.chainId,
+          contractAddress: chain.address,
+          explorer: chain.explorer,
+          metrics: {
+            lastSyncBlock: metricsSyncStatus?.lastSyncBlock || 0,
+            lastSyncTime: metricsSyncStatus?.lastSyncTime || null,
+            isRunning: metricsSyncStatus?.isRunning || false,
+            lastError: metricsSyncStatus?.lastError || null
+          },
+          orders: {
+            lastSyncBlock: ordersSyncStatus?.lastSyncBlock || 0,
+            lastSyncTime: ordersSyncStatus?.lastSyncTime || null,
+            isRunning: ordersSyncStatus?.isRunning || false,
+            lastError: ordersSyncStatus?.lastError || null
+          }
+        };
+      } catch (error) {
+        syncStatuses[chain.name] = {
+          chainId: chain.chainId,
+          error: error.message
+        };
+      }
+    }
+
+    // MongoDB connection status
+    const mongoStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+
+    res.json({
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      server: {
+        node_version: process.version,
+        environment: process.env.NODE_ENV || 'production',
+        port: process.env.PORT || 3000
+      },
+      database: {
+        status: mongoStatus,
+        host: process.env.MONGODB_URI?.split('@')[1]?.split('/')[0] || 'unknown'
+      },
+      blockchain: {
+        chainsEnabled: enabledChains.length,
+        chains: syncStatuses
+      },
+      api: {
+        endpoints: ['/api/stats', '/api/stats/:chainId', '/api/orders', '/api/admin', '/api/volume', '/api/order-analytics', '/health']
+      }
+    });
+  } catch (error) {
+    console.error('❌ Health check error:', error);
+    res.status(500).json({
+      status: 'ERROR',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      error: error.message
+    });
+  }
 });
 
 // Connect to MongoDB with auto-reconnect
