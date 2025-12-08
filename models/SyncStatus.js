@@ -53,6 +53,21 @@ syncStatusSchema.statics.getOrCreate = async function(syncType, chainId = 8453) 
       await syncStatus.save();
       console.log(`📊 Created new sync status for: ${syncType} on chainId ${chainId}`);
     }
+    
+    // Check if sync has been running for too long (30+ minutes = stuck, clear the lock)
+    if (syncStatus.isRunning) {
+      const lastSyncTime = new Date(syncStatus.updatedAt).getTime();
+      const now = Date.now();
+      const runningForMs = now - lastSyncTime;
+      const runningForMinutes = runningForMs / 60000;
+      
+      if (runningForMinutes > 30) {
+        console.log(`⚠️  Sync ${syncType} on chainId ${chainId} has been running for ${runningForMinutes.toFixed(1)} minutes - clearing stuck lock`);
+        syncStatus.isRunning = false;
+        await syncStatus.save();
+      }
+    }
+    
     return syncStatus;
   } catch (error) {
     console.error(`❌ Error getting/creating sync status for ${syncType} on chainId ${chainId}:`, error);

@@ -12,7 +12,7 @@ async function syncContractMetricsForChain(chainId) {
   
   let syncStatus;
   try {
-    // Get or create sync status
+    // Get or create sync status (this now auto-clears stuck locks)
     syncStatus = await SyncStatus.getOrCreate('metrics', chainId);
     
     // Check if already running
@@ -47,7 +47,20 @@ async function syncContractMetricsForChain(chainId) {
     console.error(`❌ Error in contract metrics sync for chainId ${chainId}:`, error);
     
     if (syncStatus) {
-      await syncStatus.updateSync(0, false, error.message);
+      try {
+        await syncStatus.updateSync(0, false, error.message);
+      } catch (updateError) {
+        console.error(`❌ Failed to update sync status error:`, updateError);
+        // Force reset isRunning flag even if update fails
+        try {
+          await SyncStatus.updateOne(
+            { syncType: 'metrics', chainId },
+            { isRunning: false, lastError: error.message }
+          );
+        } catch (forceError) {
+          console.error(`❌ Failed to force reset sync status:`, forceError);
+        }
+      }
     }
   }
 }
@@ -180,8 +193,21 @@ async function syncOrderHistoryForChain(chainId) {
     console.error(`❌ Error in order history sync for chainId ${chainId}:`, error);
     
     if (syncStatus) {
-      const currentBlock = await contractService.getCurrentBlockNumber(chainId).catch(() => 0);
-      await syncStatus.updateSync(currentBlock, false, error.message);
+      try {
+        const currentBlock = await contractService.getCurrentBlockNumber(chainId).catch(() => 0);
+        await syncStatus.updateSync(currentBlock, false, error.message);
+      } catch (updateError) {
+        console.error(`❌ Failed to update sync status error:`, updateError);
+        // Force reset isRunning flag even if update fails
+        try {
+          await SyncStatus.updateOne(
+            { syncType: 'orders', chainId },
+            { isRunning: false, lastError: error.message }
+          );
+        } catch (forceError) {
+          console.error(`❌ Failed to force reset sync status:`, forceError);
+        }
+      }
     }
   }
 }
