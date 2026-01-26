@@ -555,6 +555,52 @@ GET /order-analytics/user/0x1234567890abcdef?range=month&chainId=8453
 
 ---
 
+### 5. Users Summary (Unique users and orders)
+
+**Endpoint:** `GET /order-analytics/users-summary`
+
+**Description:** Returns the total number of unique users and a paginated list of users with their total order counts and total volume for the requested time range and optional chain filter. Users are identified by wallet address.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `range` | string | `24h` | Time range (supports relative and absolute formats, see Time Range Formats) |
+| `chainId` | number | - | Filter results by specific chain ID |
+| `page` | number | 1 | Page number for pagination |
+| `limit` | number | 50 | Results per page (max 100) |
+
+**Example Request:**
+```bash
+GET /order-analytics/users-summary?range=30d&chainId=8453&limit=20&page=1
+```
+
+**Example Response:**
+```json
+{
+  "range": "30d",
+  "chainId": 8453,
+  "totalUsers": 234,
+  "totalOrders": 4560,
+  "page": 1,
+  "limit": 20,
+  "users": [
+    {
+      "userWallet": "0x1234abcd...",
+      "orderCount": 45,
+      "totalVolume": 12345.67
+    },
+    {
+      "userWallet": "0x9876efgh...",
+      "orderCount": 32,
+      "totalVolume": 6789.01
+    }
+    // ... up to `limit` users
+  ]
+}
+```
+
+
 ### 5. Comprehensive Summary
 
 **Endpoint:** `GET /order-analytics/summary`
@@ -638,33 +684,26 @@ GET /order-analytics/summary?range=7d
 
 ## Time Range Formats
 
-### Standard Periods
+### Supported Ranges
 
-The following standard time periods are supported:
+The API accepts both relative ranges and absolute dates. Relative ranges return data from the computed start time up to now. Absolute ranges select the full period specified (for example a whole year, month, or specific day).
 
-| Format | Description | Duration |
-|--------|-------------|----------|
-| `12h` | Last 12 hours | 12 hours |
-| `24h` | Last 24 hours | 24 hours |
-| `day` | Last day (same as 24h) | 24 hours |
-| `month` | Last 30 days | 30 days |
-| `year` | Last 365 days | 365 days |
+Examples of supported inputs:
 
-### Custom Formats
+- Relative periods:
+  - `12h`, `24h`, `day`, `month`, `year` (standard labels)
+  - `{number}{unit}` such as `6h`, `3d`, `2w`, `6m`
 
-You can also specify custom time ranges using the format: `{number}{unit}`
+- Absolute (exact) periods:
+  - Year: `2025` — selects from `2025-01-01T00:00:00Z` up to (but not including) `2026-01-01T00:00:00Z`.
+  - Month (ISO): `2025-12` — selects the whole month of December 2025.
+  - Date (ISO): `2025-12-10` — selects that specific UTC day (00:00 — 24:00 UTC).
+  - Date (US): `12/10/2025` — also accepted and interpreted as month/day/year (the whole day in UTC).
 
-**Units:**
-- `h` - hours
-- `d` - days  
-- `w` - weeks
-- `m` - months (30 days)
-
-**Examples:**
-- `6h` - Last 6 hours
-- `3d` - Last 3 days
-- `2w` - Last 2 weeks
-- `6m` - Last 6 months (180 days)
+Notes:
+- Relative ranges are interpreted as "last N units" (e.g. `7d` = last 7 days up to now).
+- Absolute ranges are inclusive of the period start and exclusive of the period end (i.e. `$gte: start, $lt: end` in queries).
+- If you omit the `chainId` parameter the query will run across all chains.
 
 ---
 
@@ -720,7 +759,7 @@ All successful requests return HTTP 200 with JSON data.
 #### 400 Bad Request
 ```json
 {
-  "error": "Invalid time range. Use: 12h, 24h, day, month, year or formats like 7d, 30d"
+  "error": "Invalid time range. Use relative formats like '12h','24h','7d' or absolute dates like '2025','2025-12','2025-12-10' or '12/10/2025'"
 }
 ```
 

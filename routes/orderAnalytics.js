@@ -9,9 +9,9 @@ function buildMatchQuery(filters = {}) {
   const match = {};
   
   if (filters.range && isValidTimeRange(filters.range)) {
-    const startTime = getStartTime(filters.range);
-    if (startTime) {
-      match.timestamp = { $gte: startTime };
+    const interval = getStartTime(filters.range);
+    if (interval) {
+      match.timestamp = interval.end ? { $gte: interval.start, $lt: interval.end } : { $gte: interval.start };
     }
   }
   
@@ -44,7 +44,7 @@ router.get('/timeline', async (req, res) => {
     
     if (!isValidTimeRange(range)) {
       return res.status(400).json({ 
-        error: 'Invalid time range. Use: 12h, 24h, day, month, year or formats like 7d, 30d' 
+        error: "Invalid time range. Use relative formats like '12h','24h','7d' or absolute dates like '2025','2025-12','2025-12-10' or '12/10/2025'"
       });
     }
     
@@ -152,7 +152,7 @@ router.get('/by-token', async (req, res) => {
     
     if (!isValidTimeRange(range)) {
       return res.status(400).json({ 
-        error: 'Invalid time range. Use: 12h, 24h, day, month, year or formats like 7d, 30d' 
+        error: "Invalid time range. Use relative formats like '12h','24h','7d' or absolute dates like '2025','2025-12','2025-12-10' or '12/10/2025'"
       });
     }
     
@@ -303,7 +303,7 @@ router.get('/by-chain', async (req, res) => {
     
     if (!isValidTimeRange(range)) {
       return res.status(400).json({ 
-        error: 'Invalid time range. Use: 12h, 24h, day, month, year or formats like 7d, 30d' 
+        error: "Invalid time range. Use relative formats like '12h','24h','7d' or absolute dates like '2025','2025-12','2025-12-10' or '12/10/2025'"
       });
     }
     
@@ -475,7 +475,7 @@ router.get('/user/:userWallet', async (req, res) => {
     
     if (!isValidTimeRange(range)) {
       return res.status(400).json({ 
-        error: 'Invalid time range. Use: 12h, 24h, day, month, year or formats like 7d, 30d' 
+        error: "Invalid time range. Use relative formats like '12h','24h','7d' or absolute dates like '2025','2025-12','2025-12-10' or '12/10/2025'"
       });
     }
     
@@ -619,7 +619,7 @@ router.get('/summary', async (req, res) => {
     
     if (!isValidTimeRange(range)) {
       return res.status(400).json({ 
-        error: 'Invalid time range. Use: 12h, 24h, day, month, year or formats like 7d, 30d' 
+        error: "Invalid time range. Use relative formats like '12h','24h','7d' or absolute dates like '2025','2025-12','2025-12-10' or '12/10/2025'"
       });
     }
     
@@ -758,4 +758,74 @@ router.get('/summary', async (req, res) => {
   }
 });
 
+// ==================== USERS SUMMARY ====================
+// Get total unique users and per-user order counts (paginated)
+// Query params: range (default: 24h), chainId (optional), page, limit
+router.get('/users-summary', async (req, res) => {
+  try {
+    const { range = '24h', chainId, page = 1, limit = 50 } = req.query;
+
+    if (!isValidTimeRange(range)) {
+      return res.status(400).json({ error: "Invalid time range. Use relative formats like '12h','24h','7d' or absolute dates like '2025','2025-12','2025-12-10' or '12/10/2025'" });
+    }
+
+    const match = buildMatchQuery({ range, chainId });
+
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+    const skip = (pageNum - 1) * limitNum;
+
+    const pipeline = [
+      { $match: match },
+      {
+        $group: {
+          _id: '$userWallet',
+          orderCount: { $sum: 1 },
+          totalVolume: {
+            $sum: {
+              $toDouble: {
+                $divide: [{ $toLong: '$amount' }, 1000000000000000000]
+              }
+            }
+          }
+        }
+      },
+      { $sort: { orderCount: -1 } },
+      {
+        $facet: {
+          users: [ { $skip: skip }, { $limit: limitNum } ],
+          totalUsers: [ { $count: 'count' } ],
+          totalOrders: [ { $group: { _id: null, totalOrders: { $sum: '$orderCount' } } } ]
+        }
+      }
+    ];
+
+    const agg = await Order.aggregate(pipeline);
+    const result = agg[0] || { users: [], totalUsers: [], totalOrders: [] };
+
+    const users = (result.users || []).map(u => ({
+      userWallet: u._id,
+      orderCount: u.orderCount,
+      totalVolume: u.totalVolume
+    }));
+
+    const totalUsers = (result.totalUsers && result.totalUsers[0]) ? result.totalUsers[0].count : 0;
+    const totalOrders = (result.totalOrders && result.totalOrders[0]) ? result.totalOrders[0].totalOrders : 0;
+
+    res.json({
+      range,
+      chainId: chainId ? parseInt(chainId) : 'all',
+      totalUsers,
+      totalOrders,
+      page: pageNum,
+      limit: limitNum,
+      users
+    });
+  } catch (error) {
+    console.error('❌ Error fetching users summary:', error);
+    res.status(500).json({ error: 'Failed to fetch users summary' });
+  }
+});
+
 module.exports = router;
+

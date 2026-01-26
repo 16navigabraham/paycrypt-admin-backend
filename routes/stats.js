@@ -13,12 +13,12 @@ router.get('/', async (req, res) => {
       // Return historical data
       if (!isValidTimeRange(range)) {
         return res.status(400).json({ 
-          error: 'Invalid time range format. Use format like: 1h, 24h, 7d, 30d' 
+          error: 'Invalid time range format. Use format like: 1h, 24h, 7d, 30d or dates like 2025-12-10' 
         });
       }
 
-      const startTime = getStartTime(range);
-      const query = { timestamp: { $gte: startTime } };
+      const interval = getStartTime(range);
+      const query = interval && interval.end ? { timestamp: { $gte: interval.start, $lt: interval.end } } : { timestamp: { $gte: interval.start } };
       
       // Add chainId filter if provided
       if (chainId) {
@@ -145,13 +145,14 @@ router.get('/chart/:period', async (req, res) => {
     
     if (!isValidTimeRange(period)) {
       return res.status(400).json({ 
-        error: 'Invalid time period. Use format like: 1h, 24h, 7d, 30d' 
+        error: 'Invalid time period. Use format like: 1h, 24h, 7d, 30d or dates like 2025-12-10' 
       });
     }
 
-    const startTime = getStartTime(period);
+    const interval = getStartTime(period);
+    const timeMatch = interval && interval.end ? { $gte: interval.start, $lt: interval.end } : { $gte: interval.start };
     const metrics = await ContractMetrics.find({
-      timestamp: { $gte: startTime }
+      timestamp: timeMatch
     }).sort({ timestamp: 1 });
 
     const chartData = metrics.map(metric => ({
@@ -187,11 +188,12 @@ router.get('/summary', async (req, res) => {
       });
     }
 
-    const startTime = getStartTime(range);
-    
+    const interval = getStartTime(range);
+
     // Get metrics for the period
+    const timeMatch = interval && interval.end ? { $gte: interval.start, $lt: interval.end } : { $gte: interval.start };
     const metrics = await ContractMetrics.find({
-      timestamp: { $gte: startTime }
+      timestamp: timeMatch
     }).sort({ timestamp: 1 });
 
     if (metrics.length === 0) {

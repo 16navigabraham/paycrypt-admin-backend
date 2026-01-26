@@ -32,12 +32,18 @@ router.get('/', async (req, res) => {
     if (range) {
       if (!isValidTimeRange(range)) {
         return res.status(400).json({ 
-          error: 'Invalid time range format. Use format like: 1h, 24h, 7d, 30d' 
+          error: 'Invalid time range format. Use format like: 1h, 24h, 7d, 30d, or dates like 2025-12-10 or 12/10/2025' 
         });
       }
-      
-      const startTime = getStartTime(range);
-      query.timestamp = { $gte: startTime };
+
+      const interval = getStartTime(range); // { start, end }
+      if (interval) {
+        if (interval.end) {
+          query.timestamp = { $gte: interval.start, $lt: interval.end };
+        } else {
+          query.timestamp = { $gte: interval.start };
+        }
+      }
     }
     
     // Add user filter
@@ -182,13 +188,15 @@ router.get('/analytics/summary', async (req, res) => {
         error: 'Invalid time range format' 
       });
     }
-    
-    const startTime = getStartTime(range);
-    
+
+    const interval = getStartTime(range);
+
+    const timeMatch = interval && interval.end ? { $gte: interval.start, $lt: interval.end } : { $gte: interval.start };
+
     const [orderStats, topTokens, topUsers, volumeByTime] = await Promise.all([
       // Basic order statistics
       Order.aggregate([
-        { $match: { timestamp: { $gte: startTime } } },
+        { $match: { timestamp: timeMatch } },
         {
           $group: {
             _id: null,
@@ -215,7 +223,7 @@ router.get('/analytics/summary', async (req, res) => {
       
       // Top tokens by volume
       Order.aggregate([
-        { $match: { timestamp: { $gte: startTime } } },
+        { $match: { timestamp: timeMatch } },
         {
           $group: {
             _id: '$tokenAddress',
@@ -235,7 +243,7 @@ router.get('/analytics/summary', async (req, res) => {
       
       // Top users by volume
       Order.aggregate([
-        { $match: { timestamp: { $gte: startTime } } },
+        { $match: { timestamp: timeMatch } },
         {
           $group: {
             _id: '$userWallet',
@@ -255,7 +263,7 @@ router.get('/analytics/summary', async (req, res) => {
       
       // Volume over time
       Order.aggregate([
-        { $match: { timestamp: { $gte: startTime } } },
+        { $match: { timestamp: timeMatch } },
         {
           $group: {
             _id: {
